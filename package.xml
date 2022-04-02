@@ -1,11 +1,11 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>rm_auto_aim</name>
+  <name>rm_infantry</name>
   <version>0.0.1</version>
-  <description>Auto aim algorithm for SCURM</description>
+  <description>Infantry node for SCURM</description>
   <maintainer email="ericc_feng@qq.com">Eric Feng</maintainer>
-  <maintainer email="2117674050@qq.com">Zhou Bei</maintainer>
+  <maintainer email="tomkang106@qq.com">Tom Kang</maintainer>
   <license>GNU General Public License v3.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
@@ -24,6 +24,7 @@
   <depend>rm_util</depend>
   <depend>rm_filters</depend>
   <depend>rm_trajectory</depend>
+  <depend>rm_auto_aim</depend>
 
   <depend>tf2</depend>
   <depend>tf2_ros</depend>

@@ -1,6 +1,6 @@
-#include "rm_auto_aim/auto_aim_node.hpp"
+#include "rm_infantry/auto_aim_node.hpp"
 
-namespace rm_auto_aim
+namespace rm_infantry
 {
     AutoAimNode::AutoAimNode(const rclcpp::NodeOptions &options)
     {
@@ -52,7 +52,7 @@ namespace rm_auto_aim
         std::vector<double> camera_k(9, 0);
         std::copy_n(cam_info.k.begin(), 9, camera_k.begin());
         std::shared_ptr<rm_auto_aim::ArmorDetector> detector = std::make_shared<rm_auto_aim::ArmorDetectorSVM>(node_,is_red);
-        auto_aim_algo_ = std::make_shared<rm_auto_aim::AutoAimAlgo>(node_, camera_k, cam_info.d, detector);
+        auto_aim_algo_ = std::make_shared<rm_infantry::AutoAimAlgo>(node_, camera_k, cam_info.d, detector);
         auto_aim_algo_->set_target_color(is_red);
         transform_tool_ = std::make_shared<rm_util::CoordinateTranslation>();
         measure_tool_ = std::make_shared<rm_util::MonoMeasureTool>(camera_k, cam_info.d);
@@ -127,16 +127,12 @@ namespace rm_auto_aim
                 rm_interfaces::msg::GimbalCmd gimbal_cmd;
                 gimbal_cmd.id = gimbal_cmd_id++;
                 gimbal_cmd.position.pitch = offset_pitch;
-                gimbal_cmd.position.yaw = -offset_yaw;
+                gimbal_cmd.position.yaw = offset_yaw;
                 gimbal_cmd_pub_->publish(gimbal_cmd);
             }
         }
         else
         {
-            rm_interfaces::msg::GimbalCmd gimbal_cmd;
-            gimbal_cmd.id = gimbal_cmd_id++;
-            gimbal_cmd.type = 0x3a;
-            gimbal_cmd_pub_->publish(gimbal_cmd);
 #ifdef RM_DEBUG_MODE
             RCLCPP_INFO(
                 node_->get_logger(),
@@ -186,11 +182,11 @@ namespace rm_auto_aim
         }
         return true;
     }
-} // namespace rm_auto_aim
+} // namespace rm_infantry
 
 #include "rclcpp_components/register_node_macro.hpp"
 
 // Register the component with class_loader.
 // This acts as a sort of entry point, allowing the component to be discoverable when its library
 // is being loaded into a running process.
-RCLCPP_COMPONENTS_REGISTER_NODE(rm_auto_aim::AutoAimNode)
+RCLCPP_COMPONENTS_REGISTER_NODE(rm_infantry::AutoAimNode)

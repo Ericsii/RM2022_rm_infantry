@@ -1,12 +1,16 @@
-#ifndef RM_AUTO_AIM__AUTO_AIM_ALGO_HPP
-#define RM_AUTO_AIM__AUTO_AIM_ALGO_HPP
+#ifndef RM_INFANTRY__AUTO_AIM_ALGO_HPP
+#define RM_INFANTRY__AUTO_AIM_ALGO_HPP
 
 #include <string>
 #include <memory>
 #include <vector>
+#include <iostream>
+#include <algorithm>
 
+#include <Eigen/Core>
 #include <Eigen/Geometry>
 #include <Eigen/Dense>
+
 #include "opencv2/opencv.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include <opencv2/core/eigen.hpp>
@@ -20,7 +24,7 @@
 #include "rm_filters/ekf_filter.hpp"
 #include "rm_util/rm_util.hpp"
 
-namespace rm_auto_aim
+namespace rm_infantry
 {
     class AutoAimAlgo
     {
@@ -36,7 +40,7 @@ namespace rm_auto_aim
         AutoAimAlgo(rclcpp::Node::SharedPtr node,
                           std::vector<double> camera_intrinsic,
                           std::vector<double> camera_distortion,
-                          std::shared_ptr<ArmorDetector> armor_detector);
+                          std::shared_ptr<rm_auto_aim::ArmorDetector> armor_detector);
 
         /**
          * @brief 结合下位机返回的数据对图像进行处理
@@ -60,7 +64,7 @@ namespace rm_auto_aim
          * 
          * @return ArmorTarget ： 描述目标装甲板的信息结构体，见armor_detector_interface.hpp
          */
-        ArmorTarget getTarget();
+        rm_auto_aim::ArmorTarget getTarget();
 
         /**
          * @brief 设置是否追踪目标
@@ -80,7 +84,7 @@ namespace rm_auto_aim
 
     private:
         rclcpp::Node::SharedPtr node_;                                  // rclcpp 节点
-        std::shared_ptr<ArmorDetector> armor_detector_;                 // 装甲板检测对象
+        std::shared_ptr<rm_auto_aim::ArmorDetector> armor_detector_;                 // 装甲板检测对象
         std::shared_ptr<rm_util::MonoMeasureTool> mono_loacation_tool_; // 单目测量工具
 
         rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr point_pub_;
@@ -88,7 +92,7 @@ namespace rm_auto_aim
 
         std::vector<cv::Point3f> mSmallArmorPoints; // 小装甲三维点
         std::vector<cv::Point3f> mBigArmorPoints;   // 大装甲三维点
-        ArmorTarget mTarget;                        // 最终目标
+        rm_auto_aim::ArmorTarget mTarget;                        // 最终目标
         bool mIsTrack;
 
         Eigen::Quaterniond cam2imu_static_;
@@ -117,6 +121,6 @@ namespace rm_auto_aim
         double auto_aim_time[10]; // [1]begin，[2]max，[3]end，[0]round-T
         std::string end_pre = "normal"; // normal right left
     };
-} // namespace rm_auto_aim
+} // namespace rm_infantry
 
-#endif // RM_AUTO_AIM__AUTO_AIM_ALGO_HPP
+#endif // RM_INFANTRY__AUTO_AIM_ALGO_HPP

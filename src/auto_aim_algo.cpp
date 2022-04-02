@@ -1,17 +1,11 @@
-#include "rm_auto_aim/auto_aim_algo.hpp"
+#include "rm_infantry/auto_aim_algo.hpp"                                                  
 
-#include <iostream>
-#include <algorithm>
-#include <Eigen/Core>
-
-#include "rm_auto_aim/armor_detector_interface.hpp"                                                   
-
-namespace rm_auto_aim
+namespace rm_infantry
 {
     AutoAimAlgo::AutoAimAlgo(rclcpp::Node::SharedPtr node,
                              std::vector<double> camera_intrinsic,
                              std::vector<double> camera_distortion,
-                             std::shared_ptr<ArmorDetector> armor_detector) : node_(node), armor_detector_(armor_detector)
+                             std::shared_ptr<rm_auto_aim::ArmorDetector> armor_detector) : node_(node), armor_detector_(armor_detector)
     {
         mono_loacation_tool_ = std::make_shared<rm_util::MonoMeasureTool>(camera_intrinsic, camera_distortion);
 
@@ -57,7 +51,7 @@ namespace rm_auto_aim
 
         // 相机到陀螺仪旋转 (根据陀螺仪安装位置进行修改)
         Eigen::Matrix3d rotation;
-        rotation << 0, 0, 1, -1, 0, 0, 0, -1, 0;
+        rotation << 1, 0, 0, 0, 0, 1, 0, -1, 0;
         cam2imu_static_ = Eigen::Quaterniond(rotation);
     }
 
@@ -85,8 +79,10 @@ namespace rm_auto_aim
 
         auto euler_angles = rm_util::CoordinateTranslation::quat2euler(pose);
         float c_pitch, c_yaw;
-        c_pitch = rm_util::rad_to_deg(euler_angles(1));
-        c_yaw = rm_util::rad_to_deg(euler_angles(0));
+        c_pitch = rm_util::rad_to_deg(euler_angles(0));
+        if(c_pitch>90)
+            c_pitch=c_pitch-180;
+        c_yaw = rm_util::rad_to_deg(euler_angles(2));
 #ifdef RM_DEBUG_MODE
         RCLCPP_INFO(node_->get_logger(), "c_pitch: %f, c_yaw: %f", c_pitch, c_yaw);
 #endif
@@ -100,6 +96,7 @@ namespace rm_auto_aim
 #ifdef RM_DEBUG_MODE
             cv::Mat debugImg = src;
             cv::imshow("target", debugImg);
+            cv::waitKey(1);
 #endif
             return 1; // 无目标
         }
@@ -112,7 +109,7 @@ namespace rm_auto_aim
 #endif
         
         // 装甲板按照图像中心（准星）远近排序
-        sort(armor_descriptors.begin(), armor_descriptors.end(), [img_center_point](const ArmorDescriptor &a, const ArmorDescriptor &b){
+        sort(armor_descriptors.begin(), armor_descriptors.end(), [img_center_point](const rm_auto_aim::ArmorDescriptor &a, const rm_auto_aim::ArmorDescriptor &b){
             auto dis_a = cv::norm(img_center_point - a.centerPoint);
             auto dis_b = cv::norm(img_center_point - b.centerPoint);
             return dis_a < dis_b;
@@ -125,7 +122,7 @@ namespace rm_auto_aim
         Eigen::Vector3d position3d_camera;  //相机坐标系坐标
         for (size_t i = 0; i < armor_descriptors.size(); ++i)
         {
-            ArmorTarget armor_target;
+            rm_auto_aim::ArmorTarget armor_target;
             armor_target.armorDescriptor = armor_descriptors[i];
             auto label = armor_descriptors[i].label;
             vector<cv::Point2f> points;
@@ -139,6 +136,7 @@ namespace rm_auto_aim
 #ifdef RM_DEBUG_MODE
                 cv::Mat debugImg = src;
                 cv::imshow("target", debugImg);
+                cv::waitKey(1);
 #endif
                 return 2; //自瞄时label为0则直接返回
             }
@@ -428,7 +426,7 @@ namespace rm_auto_aim
         return 0;
     }
 
-    ArmorTarget AutoAimAlgo::getTarget()
+    rm_auto_aim::ArmorTarget AutoAimAlgo::getTarget()
     {
         return this->mTarget;
     }

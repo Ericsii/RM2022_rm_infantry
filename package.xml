@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>rm_auto_aim</name>
+  <version>0.0.1</version>
+  <description>Auto aim algorithm for SCURM</description>
+  <maintainer email="ericc_feng@qq.com">Eric Feng</maintainer>
+  <maintainer email="2117674050@qq.com">Zhou Bei</maintainer>
+  <license>GNU General Public License v3.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>libopencv-dev</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_components</depend>
+  <depend>eigen3_cmake_module</depend>
+  <depend>eigen3</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+
+  <depend>rm_interfaces</depend>
+  <depend>rm_cam</depend>
+  <depend>rm_util</depend>
+  <depend>rm_filters</depend>
+  <depend>rm_trajectory</depend>
+
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

@@ -1,0 +1,4 @@
+*.onnx filter=lfs diff=lfs merge=lfs -text
+*.bin filter=lfs diff=lfs merge=lfs -text
+HOG_SVM.xml filter=lfs diff=lfs merge=lfs -text
+polygon_best.xml filter=lfs diff=lfs merge=lfs -text

@@ -1,4 +1,4 @@
-#include "rm_infantry/auto_aim_algo.hpp"                                                  
+#include "rm_infantry/auto_aim_algo.hpp"
 
 namespace rm_infantry
 {
@@ -29,7 +29,7 @@ namespace rm_infantry
         mBigArmorPoints.emplace_back(-half_x, -half_y, 0);
         mBigArmorPoints.emplace_back(half_x, -half_y, 0);
         mBigArmorPoints.emplace_back(half_x, half_y, 0);
-        
+
         mono_loacation_tool_ = std::make_shared<rm_util::MonoMeasureTool>(camera_intrinsic, camera_distortion);
 
         point_pub_ = node_->create_publisher<geometry_msgs::msg::PointStamped>(
@@ -38,21 +38,49 @@ namespace rm_infantry
         cam_point_pub_ = node_->create_publisher<geometry_msgs::msg::PointStamped>(
             "camera/clicked_point", 10);
 
-        Eigen::MatrixXd z_k(rm_filters::Matrix_y, 1);
-        z_k(0, 0) = 0;
-        z_k(1, 0) = 0;
-        z_k(2, 0) = 0;
+        Eigen::MatrixXd Q(6, 6);
+        Q << 0.01, 0, 0, 0, 0, 0,
+            0, 0.01, 0, 0, 0, 0,
+            0, 0, 0.01, 0, 0, 0,
+            0, 0, 0, 0.01, 0, 0,
+            0, 0, 0, 0, 0.01, 0,
+            0, 0, 0, 0, 0, 0.01;
+        Eigen::MatrixXd R(3, 3);
+        R << 0.01, 0, 0,
+            0, 0.01, 0,
+            0, 0, 0.01;
 
-        ekf_filter = new rm_filters::ExKalman(
-                rm_filters::MState::const_acc, rm_filters::MState::df_const_acc, 
-                rm_filters::MState::se_df_const_acc, rm_filters::MState::const_acc_sensor, 
-                rm_filters::MState::df_const_acc_sensor, rm_filters::MState::se_df_const_acc_sensor);
-        ekf_filter->init(z_k);
+        std::stringstream ss;
+        ss << "Kalman param: " << std::endl;
+        ss << "Q = " << std::endl
+           << Q << std::endl;
+        ss << "R = " << std::endl
+           << R << std::endl;
+        RCLCPP_INFO(
+            node_->get_logger(),
+            "%s", ss.str().c_str());
+
+        auto ekf = std::make_shared<rm_filters::ExKalmanFilter>(6, 3, 0, Q, R); // 构造扩展卡尔曼滤波器
+        ekf->base_state = rm_filters::MState::const_acc;
+        ekf->df_state = rm_filters::MState::df_const_acc;
+        ekf->se_df_state = rm_filters::MState::se_df_const_acc;
+        ekf->base_sensor = rm_filters::MState::const_acc_sensor;
+        ekf->df_sensor = rm_filters::MState::df_const_acc_sensor;
+        ekf->se_df_sensor = rm_filters::MState::se_df_const_acc_sensor;
+
+        ekf_filter = ekf;
+
+        Eigen::VectorXd x_0 = Eigen::VectorXd::Zero(6); // 初始状态
+        ekf_filter->init(x_0);
 
         // 相机到陀螺仪旋转 (根据陀螺仪安装位置进行修改)
         Eigen::Matrix3d rotation;
         rotation << 1, 0, 0, 0, 0, 1, 0, -1, 0;
         cam2imu_static_ = Eigen::Quaterniond(rotation);
+
+        // 弹道解算器
+        gimbal_solver_ = std::make_shared<rm_trajectory::TrajectoryGravity>(30);
+        transform_tool_ = std::make_shared<rm_trajectory::TrajectoryGimbal>(gimbal_solver_);
     }
 
     int AutoAimAlgo::process(double time_stamp, cv::Mat &src, Eigen::Quaterniond pose, int aim_mode)
@@ -63,14 +91,14 @@ namespace rm_infantry
 
         // 自瞄预测参数
         bool same_armor = false, same_id = false;
-        double initial_vel = 30., shoot_delay = 10;
+        double initial_vel = 18., shoot_delay = 100;
 
         // 仅供测试使用，无弹道补偿和滤波跟踪
-        using std::vector;
         using std::sort;
+        using std::vector;
 
-        (void) time_stamp;
-        (void) pose;
+        (void)time_stamp;
+        (void)pose;
 
         // 陀螺仪四元数、坐标系转换四元数
         Eigen::Quaterniond imu_q(pose.w(), pose.x(), pose.y(), pose.z());
@@ -78,13 +106,15 @@ namespace rm_infantry
         // Eigen::Quaterniond q = imu_q.inverse();         //    imu_q四元数矩阵的逆矩阵
 
         auto euler_angles = rm_util::CoordinateTranslation::quat2euler(pose);
-        float c_pitch, c_yaw;
+        float c_pitch, c_yaw, c_roll;
+        
         c_pitch = rm_util::rad_to_deg(euler_angles(0));
-        if(c_pitch>90)
-            c_pitch=c_pitch-180;
         c_yaw = rm_util::rad_to_deg(euler_angles(2));
+        c_roll = rm_util::rad_to_deg(euler_angles(1));
+        (void) c_yaw;
+        (void) c_roll;
 #ifdef RM_DEBUG_MODE
-        RCLCPP_INFO(node_->get_logger(), "c_pitch: %f, c_yaw: %f", c_pitch, c_yaw);
+        RCLCPP_INFO(node_->get_logger(), "c_pitch: %f, c_yaw: %f, c_roll: %f", c_pitch, c_yaw, c_roll);
 #endif
         auto img_center_point = cv::Point2f(src.cols / 2, src.rows / 2);
 
@@ -107,19 +137,19 @@ namespace rm_infantry
             node_->get_logger(),
             "detected armor size: %lu", armor_descriptors.size());
 #endif
-        
+
         // 装甲板按照图像中心（准星）远近排序
-        sort(armor_descriptors.begin(), armor_descriptors.end(), [img_center_point](const rm_auto_aim::ArmorDescriptor &a, const rm_auto_aim::ArmorDescriptor &b){
+        sort(armor_descriptors.begin(), armor_descriptors.end(), [img_center_point](const rm_auto_aim::ArmorDescriptor &a, const rm_auto_aim::ArmorDescriptor &b)
+             {
             auto dis_a = cv::norm(img_center_point - a.centerPoint);
             auto dis_b = cv::norm(img_center_point - b.centerPoint);
-            return dis_a < dis_b;
-        });
+            return dis_a < dis_b; });
         // 默认选择离准星最近的装甲板
         mTarget.armorDescriptor = armor_descriptors.front();
 
         // step2.坐标解算--装甲板筛选
-        Eigen::Vector3d position3d_world;   //世界坐标系坐标
-        Eigen::Vector3d position3d_camera;  //相机坐标系坐标
+        Eigen::Vector3d position3d_world;  //世界坐标系坐标
+        Eigen::Vector3d position3d_camera; //相机坐标系坐标
         for (size_t i = 0; i < armor_descriptors.size(); ++i)
         {
             rm_auto_aim::ArmorTarget armor_target;
@@ -130,7 +160,9 @@ namespace rm_infantry
             points.push_back(armor_descriptors[i].points[1]);
             points.push_back(armor_descriptors[i].points[2]);
             points.push_back(armor_descriptors[i].points[3]);
-
+            #ifdef RM_DEBUG_MODE
+                RCLCPP_INFO(node_->get_logger(), "armor_label: %d", label);
+            #endif
             if (aim_mode == 0x11 && label == 0)
             {
 #ifdef RM_DEBUG_MODE
@@ -138,17 +170,17 @@ namespace rm_infantry
                 cv::imshow("target", debugImg);
                 cv::waitKey(1);
 #endif
-                return 2; //自瞄时label为0则直接返回
+                continue; //自瞄时label为0则直接返回
             }
             //【图像->相机】PnP解算：目标图像坐标系--->在相机坐标系下的坐标
             if (label == 1 || label == 0)
             {
                 // 大装甲板匹配
                 mono_loacation_tool_->solve_pnp(points, mBigArmorPoints,
-                                                armor_target.postion, armor_target.rotation);   
+                                                armor_target.postion, armor_target.rotation);
                 armor_target.isBigArmor = true;
 #ifdef RM_DEBUG_MODE
-                RCLCPP_INFO(node_->get_logger(),"big_armor: %d", label);
+                RCLCPP_INFO(node_->get_logger(), "big_armor: %d", label);
 #endif
             }
             else
@@ -161,7 +193,7 @@ namespace rm_infantry
             // 【相机->世界】目标相机坐标系--->在世界坐标系下的坐标（陀螺仪的世界坐标系）
             Eigen::Vector3d position3d_camera_temp(armor_target.postion.x, armor_target.postion.y, armor_target.postion.z);
             Eigen::Vector3d position3d_world_temp = imu_q * cam2imu_static_ * position3d_camera_temp;
-            if (i==0)
+            if (i == 0)
             {
                 //默认选择距离准星最近装甲板
                 mTarget.armorDescriptor = armor_descriptors[i];
@@ -179,11 +211,8 @@ namespace rm_infantry
             {
                 same_id = false;
                 // 不同ID初始化滤波器
-                Eigen::MatrixXd z_k(rm_filters::Matrix_y, 1);
-                z_k(0, 0) = 0;
-                z_k(1, 0) = 0;
-                z_k(2, 0) = 0;
-                ekf_filter->init(z_k);
+                Eigen::VectorXd x_0 = Eigen::VectorXd::Zero(6); // 初始状态
+                ekf_filter->init(x_0);
             }
             // 2）判断是否为上次击打同一装甲板(如果是，则直接选中并跳出筛选)
             if (same_id && is_same_armor(last_position3d_world, position3d_world_temp, 5))
@@ -198,87 +227,74 @@ namespace rm_infantry
             {
                 same_armor = false;
                 // 不同装甲板初始化滤波器
-                Eigen::MatrixXd z_k(rm_filters::Matrix_y, 1);
-                z_k(0, 0) = 0;
-                z_k(1, 0) = 0;
-                z_k(2, 0) = 0;
-                ekf_filter->init(z_k);
+                Eigen::VectorXd x_0 = Eigen::VectorXd::Zero(6); // 初始状态
+                ekf_filter->init(x_0);
             }
         }
-        
-        double target_pitch = rm_util::rad_to_deg(atan2(-position3d_camera(1, 0), sqrt(pow(position3d_camera(0,0),2)+pow(position3d_camera(2,0),2))));
+        double target_pitch = rm_util::rad_to_deg(atan2(-position3d_camera(1, 0), sqrt(pow(position3d_camera(0, 0), 2) + pow(position3d_camera(2, 0), 2))));
         double target_yaw = rm_util::rad_to_deg(atan2(position3d_camera(0, 0), position3d_camera(2, 0)));
-        double target_distance = sqrt(pow(position3d_world(0,0),2)+pow(position3d_world(1,0),2));
+        double target_distance = sqrt(pow(position3d_world(0, 0), 2) + pow(position3d_world(1, 0), 2));
         double target_height = position3d_world(2, 0);
-        
+
 #ifdef RM_DEBUG_MODE
         RCLCPP_INFO(node_->get_logger(),
-                "\n------------滤波前：------------");
+                    "\n------------滤波前：------------");
         RCLCPP_INFO(node_->get_logger(),
-                "[camera] target_x: %f, target_y: %f, target_z: %f", 
-                position3d_camera(0,0), position3d_camera(1,0), position3d_camera(2,0));
+                    "[camera] target_x: %f, target_y: %f, target_z: %f",
+                    position3d_camera(0, 0), position3d_camera(1, 0), position3d_camera(2, 0));
         RCLCPP_INFO(node_->get_logger(),
-                "[world] target_x: %f, target_y: %f, target_z: %f", 
-                position3d_world(0,0),position3d_world(1,0),position3d_world(2,0));
+                    "[world] target_x: %f, target_y: %f, target_z: %f",
+                    position3d_world(0, 0), position3d_world(1, 0), position3d_world(2, 0));
         RCLCPP_INFO(node_->get_logger(),
-                "real_target_pitch: %f, real_target_yaw: %f",  
-                target_pitch, target_yaw);
+                    "real_target_pitch: %f, real_target_yaw: %f",
+                    target_pitch, target_yaw);
         RCLCPP_INFO(node_->get_logger(),
-                "target_distance: %f, target_height: %f", 
-                target_distance, target_height);
+                    "target_distance: %f, target_height: %f",
+                    target_distance, target_height);
 #endif
 
         double pre_target_pitch = target_pitch;
         double pre_target_yaw = target_yaw;
         double pre_target_distance = target_distance;
         double pre_target_height = target_height;
+        (void)pre_target_pitch;
+        (void)pre_target_height;
         //实际目标pitch、yaw
         mTarget_yaw = float(target_yaw);
         mTarget_pitch = float(target_pitch);
         //预测击打延时--子弹飞行时间与发弹延迟
         double time = (time_stamp - last_time);
-        if(time > 40)  time /= 5;  //防止因两帧间时间差过大导致的过偏移
-        double predict_time = (f_position3d_world.norm()*10) / initial_vel + shoot_delay;
+        if (time > 40)
+            time /= 5; //防止因两帧间时间差过大导致的过偏移
+        double predict_time = (f_position3d_world.norm() * 10) / initial_vel + shoot_delay;
 
         // step4.滤波预测补偿
-        if (same_armor){
+        if (same_armor)
+        {
             // 【正常滤波模式】 击打同一块装甲板，EKF滤波预测
-            Eigen::MatrixXd z_k(rm_filters::Matrix_y, 1);
-            z_k(0, 0) = position3d_world(0, 0), z_k(1, 0) = position3d_world(1, 0);
-            z_k(2, 0) = position3d_world(2, 0);
-
-            Eigen::MatrixXd U(rm_filters::Matrix_x, rm_filters::Matrix_x);
-            U(0, 0) = 0; U(0, 1) = 0; U(0, 5) = 0;
-            U(0, 2) = 0; U(0, 3) = 0;  U(0, 4) = 0;
-            U(1, 0) = 0; U(1, 1) = 0;	
-            U(1, 2) = 0; U(1, 3) = 0;  U(1, 4) = 0; U(1, 5) = 0;
-            U(2, 0) = 0; U(2, 1) = 0;  U(2, 5) = 0;
-            U(2, 2) = 0; U(2, 3) = 0;  U(2, 4) = 0;
-            U(3, 0) = 0; U(3, 1) = 0;  U(3, 5) = 0;
-            U(3, 2) = 0; U(3, 3) = 0;  U(3, 4) = 0;
-            U(4, 0) = 0; U(4, 1) = 0;  U(4, 5) = 0; 
-            U(4, 2) = 0; U(4, 3) = 0;  U(4, 4) = 0;
-            U(5, 0) = 0; U(5, 1) = 0;  U(5, 2) = 0; U(5, 3) = 0;
-            U(5, 4) = 0; U(5, 5) = 0;
-
+            Eigen::VectorXd u(6);
+            Eigen::VectorXd z_k(3);
+            u << 0, 0, 0, 0, 0, 0;
+            z_k << position3d_world(0, 0), position3d_world(1, 0), position3d_world(2, 0);
             //预测更新
-            ekf_filter->predict(U, time);
-            Eigen::MatrixXd x_k = ekf_filter->update(z_k);
+            ekf_filter->predict(u, time);
 
+            Eigen::MatrixXd x_k = ekf_filter->update(z_k);
             //滤波的装甲板中心点
             f_position3d_world(0, 0) = z_k(0, 0);
             f_position3d_world(1, 0) = z_k(1, 0);
             f_position3d_world(2, 0) = z_k(2, 0);
-
             //预测的击打点
-            filter_position3d_world(0, 0) = z_k(0, 0) + x_k(3, 0)*predict_time;
-            filter_position3d_world(1, 0) = z_k(1, 0) + x_k(4, 0)*predict_time;
-            filter_position3d_world(2, 0) = z_k(2, 0) + x_k(5, 0)*predict_time;
-        
+            filter_position3d_world(0, 0) = z_k(0, 0) + x_k(3, 0) * predict_time;
+            filter_position3d_world(1, 0) = z_k(1, 0) + x_k(4, 0) * predict_time;
+            filter_position3d_world(2, 0) = z_k(2, 0) + x_k(5, 0) * predict_time;
+
 #ifdef RM_DEBUG_MODE
-            RCLCPP_INFO(node_->get_logger(),"【速度】 v_x: %f, v_y: %f, v_z: %f", x_k(3, 0), x_k(4, 0), x_k(5, 0));
+            RCLCPP_INFO(node_->get_logger(), "【速度】 v_x: %f, v_y: %f, v_z: %f", x_k(3, 0), x_k(4, 0), x_k(5, 0));
 #endif
-        } else {
+        }
+        else
+        {
             filter_position3d_world(0, 0) = position3d_world(0, 0);
             filter_position3d_world(1, 0) = position3d_world(1, 0);
             filter_position3d_world(2, 0) = position3d_world(2, 0);
@@ -287,39 +303,40 @@ namespace rm_infantry
         // step5.反小陀螺
         end_pre = "normal";
         aim_range = 0;
-        double world_pitch = rm_util::rad_to_deg(atan2(position3d_world(2, 0), sqrt(pow(position3d_world(0,0),2)+pow(position3d_world(1,0),2))));
-        double world_yaw = rm_util::rad_to_deg(atan2(position3d_world(1, 0), position3d_world(0, 0)));
-        if (aim_mode==0x11 && same_id && mTarget.armorDescriptor.label){
+        double world_pitch = rm_util::rad_to_deg(atan2(position3d_world(2, 0), sqrt(pow(position3d_world(0, 0), 2) + pow(position3d_world(1, 0), 2))));
+        double world_yaw = -rm_util::rad_to_deg(atan2(position3d_world(0, 0), position3d_world(1, 0)));
+        (void)world_pitch;
+        if (aim_mode == 0x11 && same_id && mTarget.armorDescriptor.label)
+        {
             //【反小陀螺模式之跟随】 0x11--同一id(不为 0)
             // 1.通过装甲板面积周期变化得到旋转周期 auto_aim_time[0]
             double armor_area = mTarget.armorDescriptor.armorWidth * mTarget.armorDescriptor.armorHeight;
-            double area_rot = (armor_area - last_armor_area)/time;
-            if(area_rot*last_armor_area_rot <= 0)
+            double area_rot = (armor_area - last_armor_area) / time;
+            if (area_rot * last_armor_area_rot <= 0)
             {
                 auto_aim_time[0] = time_stamp - auto_aim_time[2];
                 auto_aim_time[2] = time_stamp;
             }
             // 2.切换装甲板
-            if(abs(last_yaw-world_yaw)>10 || !same_armor){
-                Eigen::MatrixXd z_k(rm_filters::Matrix_y, 1);
-                z_k(0, 0) = 0;
-                z_k(1, 0) = 0;
-                z_k(2, 0) = 0;
-                ekf_filter->init(z_k);
-                aim_range = abs(last_yaw-world_yaw);
+            if (abs(last_yaw - world_yaw) > 10 || !same_armor)
+            {
+                Eigen::VectorXd x_0 = Eigen::VectorXd::Zero(6); // 初始状态
+                ekf_filter->init(x_0);
+                aim_range = abs(last_yaw - world_yaw);
             }
-            else{
+            else
+            {
                 // 3.跟踪某一个装甲板
                 // 左->右
                 if (last_yaw < world_yaw)
                 {
-                    if((time_stamp-auto_aim_time[2])>auto_aim_time[0]/2 && area_rot<0)  
+                    if ((time_stamp - auto_aim_time[2]) > auto_aim_time[0] / 2 && area_rot < 0)
                         end_pre = "right"; //目标消失，迅速偏移重置
                 }
                 // 右->左
                 else
                 {
-                    if((time_stamp-auto_aim_time[2])>auto_aim_time[0]/2 && area_rot<0) 
+                    if ((time_stamp - auto_aim_time[2]) > auto_aim_time[0] / 2 && area_rot < 0)
                         end_pre = "left";
                 }
             }
@@ -327,18 +344,20 @@ namespace rm_infantry
             last_armor_area_rot = area_rot;
             last_yaw = world_yaw;
         }
-        if(aim_mode==0x22 && same_id && mTarget.armorDescriptor.label){
+        if (aim_mode == 0x22 && same_id && mTarget.armorDescriptor.label)
+        {
             //【反小陀螺模式之云台不动】 0x22--同一id(不为 0)
             // 1.通过装甲板面积周期变化得到旋转周期 auto_aim_time[0]
             double armor_area = mTarget.armorDescriptor.armorWidth * mTarget.armorDescriptor.armorHeight;
-            double area_rot = (armor_area - last_armor_area)/time;
-            if(area_rot*last_armor_area_rot <= 0)
+            double area_rot = (armor_area - last_armor_area) / time;
+            if (area_rot * last_armor_area_rot <= 0)
             {
                 auto_aim_time[0] = time_stamp - auto_aim_time[2];
                 auto_aim_time[2] = time_stamp;
             }
-            if(time_stamp>=(auto_aim_time[2]+auto_aim_time[0]-predict_time))
+            if (time_stamp >= (auto_aim_time[2] + auto_aim_time[0] - predict_time))
                 shoot = true;
+            
             last_armor_area = armor_area;
             last_armor_area_rot = area_rot;
         }
@@ -351,41 +370,55 @@ namespace rm_infantry
         pre_camera = cam2imu_static_.inverse() * imu_q.inverse() * pre_camera;
         /* yaw预测补偿*/
         pre_target_yaw = rm_util::rad_to_deg(atan2(pre_camera(0, 0), pre_camera(2, 0)));
-        pre_target_distance = sqrt(pow(filter_position3d_world(0,0),2)+pow(filter_position3d_world(1,0),2));
-        if(abs(pre_target_distance)>1000)
+        pre_target_distance = sqrt(pow(filter_position3d_world(0, 0), 2) + pow(filter_position3d_world(1, 0), 2));
+        if (abs(pre_target_distance) > 1000 || pre_target_distance <= 0)
             return 3; //防止距离错误
+
         /* pitch抬枪补偿 distance(单位：mm) height(单位：m)*/
-        pre_target_height = filter_position3d_world(2, 0); //距离枪口高度
-        auto offset_pitch = std::make_shared<rm_trajectory::GetPitch>(initial_vel);
-        double pitch_temp = offset_pitch->get_pitch(pre_target_distance*10, pre_target_height*10, initial_vel);
-        pre_target_pitch = pitch_temp; //此处得到的是绝对姿态pitch，需要减去当前pitch角
+        //【枪口弹道偏移】弹道模型拟合方式
+        // pre_target_height = filter_position3d_world(2, 0) - 5; //距离枪口高度
+        // auto offset_pitch = std::make_shared<rm_trajectory::GetPitch>(30., 0.03, 2, 2);
+        // double pitch_temp = offset_pitch->get_pitch(target_distance * 10, target_height * 10, 30.);
+        // pre_target_pitch = pitch_temp; //此处得到的是绝对姿态pitch，需要减去当前pitch角
+
+        // 【枪口弹道偏移】rmoss方式
+        double pitch_temp = 0, yaw_temp = 0;
+        Eigen::Vector3d position3d_shoot(filter_position3d_world);
+        position3d_shoot(2, 0) += 5;
+        // if(position3d_shoot(1,0)>300 && position3d_shoot(2,0)>0)
+        //     position3d_shoot(2, 0) += 5*target_distance/100;
+        // else if(position3d_shoot(2,0)<0)
+        //     position3d_shoot(2, 0) += 6*target_distance/100;
+        position3d_shoot(0,0)*=0.01;position3d_shoot(1,0)*=0.01;position3d_shoot(2,0)*=0.01;
+        transform_tool_->solve(position3d_shoot, pitch_temp, yaw_temp);
+        pre_target_pitch = rm_util::rad_to_deg(pitch_temp); //此处得到的是绝对姿态pitch
+        // pre_target_yaw = rm_util::rad_to_deg(yaw_temp);
 
         // 传输最终pitch、yaw数据到上一层
-        if(abs(mTarget_pitch) <= 30 && abs(mTarget_yaw) <= 30)
+        if (abs(mTarget_pitch) <= 30 && abs(mTarget_yaw) <= 30)
         {
-            mTarget_pitch = float(pre_target_pitch - c_pitch);
-            if(end_pre == "right")
+            mTarget_pitch = float(pre_target_pitch);
+            if (end_pre == "right")
                 mTarget_yaw = float(pre_target_yaw) - aim_range;
-            else if(end_pre == "left")
+            else if (end_pre == "left")
                 mTarget_yaw = float(pre_target_yaw) + aim_range;
             else
-                mTarget_yaw = float(pre_target_yaw);
+                mTarget_yaw = world_yaw;
         }
 
-        //debug输出
+        // debug输出
 #ifdef RM_DEBUG_MODE
         RCLCPP_INFO(node_->get_logger(), "\n------------滤波后：------------");
+        RCLCPP_INFO(node_->get_logger(), "target_pitch: %f, target_yaw: %f", target_pitch, target_yaw);
+        RCLCPP_INFO(node_->get_logger(), "world_pitch: %f, world_yaw: %f", world_pitch, world_yaw);
+        RCLCPP_INFO(node_->get_logger(), "c_pitch: %f, c_yaw: %f", c_pitch, c_yaw);
+        RCLCPP_INFO(node_->get_logger(), "pre_target_height: %f, pre_target_pitch: %f, pre_target_yaw: %f", pre_target_height, pre_target_pitch, pre_target_yaw);
+        // RCLCPP_INFO(node_->get_logger(),"error: %s", transform_tool_->error_message().c_str());
+        RCLCPP_INFO(node_->get_logger(), "[shoot] target_x: %f, target_y: %f, target_z: %f", position3d_shoot(0, 0), position3d_shoot(1, 0), position3d_shoot(2, 0));
         RCLCPP_INFO(node_->get_logger(), "[world] target_x: %f, target_y: %f, target_z: %f", filter_position3d_world(0, 0), filter_position3d_world(1, 0), filter_position3d_world(2, 0));
         RCLCPP_INFO(node_->get_logger(), "[camera] target_x: %f, target_y: %f, target_z: %f", pre_camera(0, 0), pre_camera(1, 0), pre_camera(2, 0));
-        RCLCPP_INFO(node_->get_logger(), "pre_target_height: %f, pre_target_pitch: %f", pre_target_height, pre_target_pitch);        
+
         RCLCPP_INFO(node_->get_logger(), "mTarget_pitch: %f, mTarget_yaw: %f", mTarget_pitch, mTarget_yaw);
-        RCLCPP_INFO(node_->get_logger(), "time: %f", time);
-        time_bet = (time_bet + time) / 2;
-        RCLCPP_INFO(node_->get_logger(), "平均时间间隔: %f ，fps: %f", time_bet, 1000.0 / time_bet);
-
-        RCLCPP_INFO(node_->get_logger(), "旋转周期：%f", auto_aim_time[0]);
-        RCLCPP_INFO(node_->get_logger(), "上一次装甲板面积最大时刻：%f", auto_aim_time[2]);
-
         // 发布滤波后的目标点的位置信息
         geometry_msgs::msg::PointStamped cam_target_point;
         cam_target_point.point.x = filter_position3d_world(0, 0) / 100;
@@ -418,8 +451,15 @@ namespace rm_infantry
         Eigen::Vector3d pre_img = F * pre_camera / pre_camera(2, 0);
         cv::circle(debugImg, {int(pre_img(0, 0)), int(pre_img(1, 0))}, 5, {255, 255, 0}, 3);
         cv::imshow("target", debugImg);
-#endif            
-        
+        cv::waitKey(1);
+
+        RCLCPP_INFO(node_->get_logger(), "time: %f", time);
+        time_bet = (time_bet + time) / 2;
+        RCLCPP_INFO(node_->get_logger(), "平均时间间隔: %f ，fps: %f", time_bet, 1000.0 / time_bet);
+        RCLCPP_INFO(node_->get_logger(), "旋转周期：%f", auto_aim_time[0]);
+        RCLCPP_INFO(node_->get_logger(), "上一次装甲板面积最大时刻：%f", auto_aim_time[2]);
+#endif
+    
         last_time = time_stamp;
         last_label = mTarget.armorDescriptor.label;
         last_position3d_world = position3d_world;
@@ -429,6 +469,16 @@ namespace rm_infantry
     rm_auto_aim::ArmorTarget AutoAimAlgo::getTarget()
     {
         return this->mTarget;
+    }
+
+    float AutoAimAlgo::getTargetPitch()
+    {
+        return this->mTarget_pitch;
+    }
+
+    float AutoAimAlgo::getTargetYaw()
+    {
+        return this->mTarget_yaw;
     }
 
     void AutoAimAlgo::set_target_color(bool is_red)
@@ -444,14 +494,15 @@ namespace rm_infantry
     bool AutoAimAlgo::is_same_armor(Eigen::Vector3d old_position3d, Eigen::Vector3d now_position3d, double distance_threshold)
     {
         double distance = (now_position3d - old_position3d).norm();
-        if(distance < distance_threshold) 
+        if (distance < distance_threshold)
             return true;
         else
             return false;
 
 #ifdef RM_DEBUG_MODE
-        if(1){
-            RCLCPP_INFO(node_->get_logger(),"distance_to_last_target: %f", distance);
+        if (1)
+        {
+            RCLCPP_INFO(node_->get_logger(), "distance_to_last_target: %f", distance);
         }
 #endif
     }

@@ -1,8 +1,0 @@
-/**:
-    ros__parameters:
-        armor_is_red: true 
-        camera_name: 'mv_camera'
-        imu_name: 'imu/data_raw'
-        xml_path: './contrib_modules/rm_auto_aim/resource/HOG_SVM.xml'
-        best_effort_qos: true
-        auto_start: false

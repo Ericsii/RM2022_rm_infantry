@@ -9,11 +9,12 @@ namespace rm_infantry
         node_->declare_parameter("camera_name", "mv_camera");
         node_->declare_parameter("imu_name", "imu");
         node_->declare_parameter("auto_start", false);
-
+        node_->declare_parameter("gimbal_cmd_name", "cmd_gimbal");
+        
+        auto gimbal_cmd_name = node_->get_parameter("gimbal_cmd_name").as_string();
         std::string camera_name = node_->get_parameter("camera_name").as_string();
         std::string imu_name = node_->get_parameter("imu_name").as_string();
-        bool armor_is_red = node_->get_parameter("armor_is_red").as_bool();
-        bool is_red = armor_is_red;
+        bool is_red = node_->get_parameter("armor_is_red").as_bool();
 
         using namespace std::placeholders;
         RCLCPP_INFO(node_->get_logger(), "Creating rcl pub&sub&client.");
@@ -51,7 +52,7 @@ namespace rm_infantry
         // 初始化
         std::vector<double> camera_k(9, 0);
         std::copy_n(cam_info.k.begin(), 9, camera_k.begin());
-        std::shared_ptr<rm_auto_aim::ArmorDetector> detector = std::make_shared<rm_auto_aim::ArmorDetectorSVM>(node_,is_red);
+        std::shared_ptr<rm_auto_aim::ArmorDetector> detector = std::make_shared<rm_auto_aim::ArmorDetectorSVM>(node_, is_red);
         auto_aim_algo_ = std::make_shared<rm_infantry::AutoAimAlgo>(node_, camera_k, cam_info.d, detector);
         auto_aim_algo_->set_target_color(is_red);
         transform_tool_ = std::make_shared<rm_util::CoordinateTranslation>();
@@ -60,12 +61,12 @@ namespace rm_infantry
 #ifdef RM_DEBUG_MODE
         bool auto_start = node_->get_parameter("auto_start").as_bool();
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
-        if(auto_start)
+        if (auto_start)
         {
             aim_mode = 0x01;
             wrapper_client_->start();
         }
-#endif        
+#endif
         RCLCPP_INFO(
             node_->get_logger(),
             "Init finished.");
@@ -87,7 +88,6 @@ namespace rm_infantry
         pose_tf.transform.translation.z = 0.0;
         pose_tf.transform.rotation = q;
         tf_broadcaster_->sendTransform(pose_tf);
-
         RCLCPP_INFO(
             node_->get_logger(),
             "Get message");
@@ -96,48 +96,56 @@ namespace rm_infantry
         curr_pose_ = Eigen::Quaterniond(q.w, q.x, q.y, q.z);
         // 装甲板识别
         int ret = auto_aim_algo_->process(time_stamp_ms, img, curr_pose_, aim_mode);
-
         if (!ret)
         {
-            float offset_pitch, offset_yaw;
-            offset_pitch = auto_aim_algo_->mTarget_pitch;
-            offset_yaw = auto_aim_algo_->mTarget_yaw;
+            float target_pitch, target_yaw;
+            target_pitch = auto_aim_algo_->getTargetPitch();
+            target_yaw = auto_aim_algo_->getTargetYaw();
 
 #ifdef RM_DEBUG_MODE
             /* 仅从图像2D坐标进行目标跟踪
              auto target = auto_aim_algo_->getTarget();
-             measure_tool_->calc_view_angle(target.armorDescriptor.centerPoint, offset_pitch, offset_yaw);
-             offset_pitch = rm_util::rad_to_deg(auto_aim_algo_->mTarget_pitch);
-             offset_yaw = rm_util::rad_to_deg(auto_aim_algo_->mTarget_yaw); */
+             measure_tool_->calc_view_angle(target.armorDescriptor.centerPoint, target_pitch, target_yaw);
+             target_pitch = rm_util::rad_to_deg(auto_aim_algo_->mTarget_pitch);
+             target_yaw = rm_util::rad_to_deg(auto_aim_algo_->mTarget_yaw); */
             auto euler_angles = rm_util::CoordinateTranslation::quat2euler(curr_pose_);
-            float c_pitch, c_yaw;
-            c_pitch = rm_util::rad_to_deg(euler_angles(1));
-            c_yaw = rm_util::rad_to_deg(euler_angles(0));
+            float c_pitch, c_yaw, c_roll;
+            c_pitch = rm_util::rad_to_deg(euler_angles(0));
+            c_yaw = rm_util::rad_to_deg(euler_angles(2));
+            c_roll = rm_util::rad_to_deg(euler_angles(1));
 
             RCLCPP_INFO(
                 node_->get_logger(),
-                "c_pitch: %f, c_yaw: %f", c_pitch, c_yaw);
+                "c_pitch: %f, c_yaw: %f, c_roll: %f", c_pitch, c_yaw, c_roll);
             RCLCPP_INFO(
                 node_->get_logger(),
-                "offset_pitch: %f, offset_yaw: %f", offset_pitch, offset_yaw);
+                "target_pitch: %f, target_yaw: %f", target_pitch, target_yaw);
 #endif
 
             if (this->gimbal_ctrl_flag_)
             {
                 rm_interfaces::msg::GimbalCmd gimbal_cmd;
                 gimbal_cmd.id = gimbal_cmd_id++;
-                gimbal_cmd.position.pitch = offset_pitch;
-                gimbal_cmd.position.yaw = offset_yaw;
+                gimbal_cmd.position.pitch = target_pitch;
+                gimbal_cmd.position.yaw = target_yaw;
                 gimbal_cmd_pub_->publish(gimbal_cmd);
             }
         }
         else
         {
+            if (this->gimbal_ctrl_flag_)
+            {
+                rm_interfaces::msg::GimbalCmd gimbal_cmd;
+                gimbal_cmd.id = gimbal_cmd_id++;
+                gimbal_cmd.position.pitch = 0;
+                gimbal_cmd.position.yaw = 0;
+                gimbal_cmd_pub_->publish(gimbal_cmd);
+            }
 #ifdef RM_DEBUG_MODE
             RCLCPP_INFO(
                 node_->get_logger(),
                 "No armors");
-#endif 
+#endif
         }
     }
 

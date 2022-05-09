@@ -21,6 +21,8 @@
 
 #include "rm_auto_aim/armor_detector_interface.hpp"
 #include "rm_trajectory/trajectory_pitch.hpp"
+#include "rm_trajectory/trajectory_gimbal.hpp"
+#include "rm_trajectory/trajectory_gravity.hpp"
 #include "rm_filters/ekf_filter.hpp"
 #include "rm_util/rm_util.hpp"
 
@@ -67,6 +69,14 @@ namespace rm_infantry
         rm_auto_aim::ArmorTarget getTarget();
 
         /**
+         * @brief 获得目标角度
+         * 
+         * @return float
+         */
+        float getTargetPitch();
+        float getTargetYaw();
+
+        /**
          * @brief 设置是否追踪目标
          * 
          * @param is_track ： 是否追踪
@@ -75,12 +85,6 @@ namespace rm_infantry
 
         int process(double time_stamp_ms, cv::Mat &src, Eigen::Quaterniond pose, int aim_mode);
         bool is_same_armor(Eigen::Vector3d old_position3d, Eigen::Vector3d now_position3d, double distance_threshold);
-
-        float mTarget_pitch = 0;
-        float mTarget_yaw = 0;
-        double mTarget_distance = 0;
-        double mTarget_height = 0;
-        bool shoot = false;
 
     private:
         rclcpp::Node::SharedPtr node_;                                  // rclcpp 节点
@@ -92,8 +96,18 @@ namespace rm_infantry
 
         std::vector<cv::Point3f> mSmallArmorPoints; // 小装甲三维点
         std::vector<cv::Point3f> mBigArmorPoints;   // 大装甲三维点
-        rm_auto_aim::ArmorTarget mTarget;                        // 最终目标
+        rm_auto_aim::ArmorTarget mTarget;           // 最终目标
+
+        std::shared_ptr<rm_trajectory::TrajectoryInterface> gimbal_solver_;
+        std::shared_ptr<rm_trajectory::TrajectoryGimbal> transform_tool_;
+
         bool mIsTrack;
+
+        float mTarget_pitch = 0;
+        float mTarget_yaw = 0;
+        double mTarget_distance = 0;
+        double mTarget_height = 0;
+        bool shoot = false;
 
         Eigen::Quaterniond cam2imu_static_;
         Eigen::Quaterniond imu2cam_static_;
@@ -101,15 +115,12 @@ namespace rm_infantry
         int last_label = -1;
 
         Eigen::Vector3d last_position3d_world;
-        rm_filters::Filters *ekf_filter;
-        Eigen::Matrix3d f_position3d_world;
-        Eigen::Matrix3d filter_position3d_world;
-        Eigen::MatrixXd U;
-        Eigen::Matrix3d F;
+        std::shared_ptr<rm_filters::FilterInterface> ekf_filter;
+        Eigen::Vector3d f_position3d_world;
+        Eigen::Vector3d filter_position3d_world;
         std::vector<double> x;
         std::vector<double> y;
         std::vector<double> z;
-        Eigen::Vector3d p_t;
 
         double last_time = 0;
         int id = 0;

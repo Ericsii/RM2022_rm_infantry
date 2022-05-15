@@ -10,7 +10,7 @@ namespace rm_infantry
         node_->declare_parameter("imu_name", "imu");
         node_->declare_parameter("auto_start", false);
         node_->declare_parameter("gimbal_cmd_name", "cmd_gimbal");
-        
+
         auto gimbal_cmd_name = node_->get_parameter("gimbal_cmd_name").as_string();
         std::string camera_name = node_->get_parameter("camera_name").as_string();
         std::string imu_name = node_->get_parameter("imu_name").as_string();
@@ -20,8 +20,16 @@ namespace rm_infantry
         RCLCPP_INFO(node_->get_logger(), "Creating rcl pub&sub&client.");
         gimbal_cmd_pub_ = node_->create_publisher<rm_interfaces::msg::GimbalCmd>(
             "cmd_gimbal", 10);
+        
         set_mode_srv_ = node_->create_service<rm_interfaces::srv::SetMode>(
             "auto_aim/set_mode", std::bind(&AutoAimNode::set_mode_cb, this, _1, _2));
+
+        //获取本局颜色    
+        // get_color_cli_ = node_->create_client<rm_interfaces::srv::GetColor>("get_color");
+        // auto get_color_rqt = std::make_shared<rm_interfaces::srv::GetColor::Request>();
+        // get_color_rqt->node_type = std::string(node_->get_namespace())+std::string("auto_aim");
+        // auto color_get_result = get_color_cli_->async_send_request(get_color_rqt);
+        // is_red = bool(color_get_result.get()->color);
 
         wrapper_client_ = std::make_shared<rm_cam::WrapperClient>(
             node_, camera_name, imu_name, std::bind(&AutoAimNode::process_fn, this, _1, _2, _3));
@@ -58,7 +66,7 @@ namespace rm_infantry
         transform_tool_ = std::make_shared<rm_util::CoordinateTranslation>();
         measure_tool_ = std::make_shared<rm_util::MonoMeasureTool>(camera_k, cam_info.d);
 
-#ifdef RM_DEBUG_MODE
+        // #ifdef RM_DEBUG_MODE
         bool auto_start = node_->get_parameter("auto_start").as_bool();
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
         if (auto_start)
@@ -66,7 +74,7 @@ namespace rm_infantry
             aim_mode = 0x01;
             wrapper_client_->start();
         }
-#endif
+        // #endif
         RCLCPP_INFO(
             node_->get_logger(),
             "Init finished.");
@@ -94,8 +102,20 @@ namespace rm_infantry
 #endif
         // 姿态四元数
         curr_pose_ = Eigen::Quaterniond(q.w, q.x, q.y, q.z);
+        auto euler_angles = rm_util::CoordinateTranslation::quat2euler(curr_pose_);
+        float c_pitch, c_yaw, c_roll;
+        c_pitch = rm_util::rad_to_deg(euler_angles(0));
+        c_yaw = rm_util::rad_to_deg(euler_angles(2));
+        c_roll = rm_util::rad_to_deg(euler_angles(1));
+        (void)c_roll;
         // 装甲板识别
         int ret = auto_aim_algo_->process(time_stamp_ms, img, curr_pose_, aim_mode);
+
+        rm_interfaces::msg::GimbalCmd gimbal_cmd;
+        gimbal_cmd.id = gimbal_cmd_id++;
+        gimbal_cmd.position.pitch = c_pitch;
+        gimbal_cmd.position.yaw = c_yaw;
+        
         if (!ret)
         {
             float target_pitch, target_yaw;
@@ -108,12 +128,6 @@ namespace rm_infantry
              measure_tool_->calc_view_angle(target.armorDescriptor.centerPoint, target_pitch, target_yaw);
              target_pitch = rm_util::rad_to_deg(auto_aim_algo_->mTarget_pitch);
              target_yaw = rm_util::rad_to_deg(auto_aim_algo_->mTarget_yaw); */
-            auto euler_angles = rm_util::CoordinateTranslation::quat2euler(curr_pose_);
-            float c_pitch, c_yaw, c_roll;
-            c_pitch = rm_util::rad_to_deg(euler_angles(0));
-            c_yaw = rm_util::rad_to_deg(euler_angles(2));
-            c_roll = rm_util::rad_to_deg(euler_angles(1));
-
             RCLCPP_INFO(
                 node_->get_logger(),
                 "c_pitch: %f, c_yaw: %f, c_roll: %f", c_pitch, c_yaw, c_roll);
@@ -124,8 +138,6 @@ namespace rm_infantry
 
             if (this->gimbal_ctrl_flag_)
             {
-                rm_interfaces::msg::GimbalCmd gimbal_cmd;
-                gimbal_cmd.id = gimbal_cmd_id++;
                 gimbal_cmd.position.pitch = target_pitch;
                 gimbal_cmd.position.yaw = target_yaw;
                 gimbal_cmd_pub_->publish(gimbal_cmd);
@@ -134,13 +146,7 @@ namespace rm_infantry
         else
         {
             if (this->gimbal_ctrl_flag_)
-            {
-                rm_interfaces::msg::GimbalCmd gimbal_cmd;
-                gimbal_cmd.id = gimbal_cmd_id++;
-                gimbal_cmd.position.pitch = 0;
-                gimbal_cmd.position.yaw = 0;
                 gimbal_cmd_pub_->publish(gimbal_cmd);
-            }
 #ifdef RM_DEBUG_MODE
             RCLCPP_INFO(
                 node_->get_logger(),
@@ -160,7 +166,7 @@ namespace rm_infantry
         switch (request->mode)
         {
         case 0x00:
-            wrapper_client_->stop();
+            // wrapper_client_->stop();
             break;
         case 0x01:
             gimbal_ctrl_flag_ = true;

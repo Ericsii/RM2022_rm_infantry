@@ -18,6 +18,7 @@
 #include "rm_cam/wrapper_client.hpp"
 #include "rm_interfaces/msg/gimbal_cmd.hpp"
 #include "rm_interfaces/srv/set_mode.hpp"
+#include "rm_interfaces/srv/get_color.hpp"
 #include "rm_interfaces/msg/gimbal.hpp"
 
 #include "rm_auto_aim/detector/armor_detector_svm.hpp"
@@ -58,6 +59,7 @@ namespace rm_infantry
         rclcpp::Publisher<rm_interfaces::msg::GimbalCmd>::SharedPtr gimbal_cmd_pub_;
         // ros srv
         rclcpp::Service<rm_interfaces::srv::SetMode>::SharedPtr set_mode_srv_;
+        rclcpp::Client<rm_interfaces::srv::GetColor>::SharedPtr get_color_cli_;
 
         bool gimbal_ctrl_flag_{true};
         bool shoot_ctrl_flag_{true};

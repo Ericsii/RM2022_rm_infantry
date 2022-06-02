@@ -18,13 +18,15 @@
 #include "std_msgs/msg/header.hpp"
 #include <geometry_msgs/msg/transform_stamped.hpp>
 #include <geometry_msgs/msg/point_stamped.hpp>
+#include "rm_interfaces/msg/shoot_speed.hpp"
 
 #include "rm_auto_aim/armor_detector_interface.hpp"
-#include "rm_trajectory/trajectory_pitch.hpp"
-#include "rm_trajectory/trajectory_gimbal.hpp"
-#include "rm_trajectory/trajectory_gravity.hpp"
+#include "rm_trajectory/gravity_solver.hpp"
+#include "rm_trajectory/database_solver.hpp"
+#include "rm_trajectory/gravity_nofriction_solver.hpp"
 #include "rm_filters/ekf_filter.hpp"
 #include "rm_util/rm_util.hpp"
+
 
 namespace rm_infantry
 {
@@ -85,6 +87,7 @@ namespace rm_infantry
 
         int process(double time_stamp_ms, cv::Mat &src, Eigen::Quaterniond pose, int aim_mode);
         bool is_same_armor(Eigen::Vector3d old_position3d, Eigen::Vector3d now_position3d, double distance_threshold);
+        void shoot_speed_cb(const rm_interfaces::msg::ShootSpeed::SharedPtr shoot_speed_msg_temp);
 
     private:
         rclcpp::Node::SharedPtr node_;                                  // rclcpp 节点
@@ -93,13 +96,14 @@ namespace rm_infantry
 
         rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr point_pub_;
         rclcpp::Publisher<geometry_msgs::msg::PointStamped>::SharedPtr cam_point_pub_;
-
+        rclcpp::Subscription<rm_interfaces::msg::ShootSpeed>::SharedPtr shoot_speed_sub_;
+        
         std::vector<cv::Point3f> mSmallArmorPoints; // 小装甲三维点
         std::vector<cv::Point3f> mBigArmorPoints;   // 大装甲三维点
         rm_auto_aim::ArmorTarget mTarget;           // 最终目标
 
-        std::shared_ptr<rm_trajectory::TrajectoryInterface> gimbal_solver_;
-        std::shared_ptr<rm_trajectory::TrajectoryGimbal> transform_tool_;
+        std::shared_ptr<rm_trajectory::TrajectoryInterface>  gimbal_solver_;
+        std::shared_ptr<rm_trajectory::TransformTool> transform_tool_;
 
         bool mIsTrack;
 
@@ -122,6 +126,7 @@ namespace rm_infantry
         std::vector<double> y;
         std::vector<double> z;
 
+        double initial_vel = 30., shoot_delay = 1.;
         double last_time = 0;
         int id = 0;
         int all = 0;

@@ -29,31 +29,40 @@ daheng_camera:
         camera_k: [1552.7, 0.0, 640.0, 0.0, 1537.9, 360.0, 0.0, 0.0, 1.0]
         camera_d: [0.0, 0.0, 0.0, 0.0, 0.0]
         fps: 100
-        best_effort_qos: false
+        best_effort_qos: true
 
 ##串口
 base:
     ros__parameters:
         serial_name: '/dev/ttySerial'
-        serial_send: True
-        serial_recv: True
+        serial_send: true
+        serial_recv: true
         serial_bps: 1152000
-        debug: True
-        custom_qos: True
+        debug: false
+        custom_qos: true
         imu_name: 'imu/data_raw'
         gimbal_cmd_name: 'cmd_gimbal'
         shoot_speed_name: 'shoot_speed'
-        set_mode_name: ['auto_aim','nahsor']
+        set_service_name: ['auto_aim','nahsor']
         
 ##自瞄
 auto_aim:
     ros__parameters:
-        armor_is_red: true 
+        armor_is_red: false 
         camera_name: 'mv_camera'
         imu_name: 'imu/data_raw'
         xml_path: './contrib_modules/rm_auto_aim/resource/HOG_SVM.xml'
+        onnx_xml_path: './contrib_modules/rm_auto_aim/resource/lenet_with_negative.onnx'
         best_effort_qos: true
         auto_start: true
+        shoot_delay: 1.
+        shoot_speed_name: 'shoot_speed'
+        color_hsv: [150,0,0,  # red 1 
+                    170,255,255,
+                    0,0,0,     # red 2
+                    50,255,255, 
+                    6,0,100,    # blue 虽然没有用到
+                    120,255,255]
 
 imu_filter:
   ros__parameters:

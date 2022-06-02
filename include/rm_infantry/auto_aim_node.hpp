@@ -18,16 +18,18 @@
 #include "rm_cam/wrapper_client.hpp"
 #include "rm_interfaces/msg/gimbal_cmd.hpp"
 #include "rm_interfaces/srv/set_mode.hpp"
-#include "rm_interfaces/srv/get_color.hpp"
+#include "rm_interfaces/srv/set_color.hpp"
 #include "rm_interfaces/msg/gimbal.hpp"
 
 #include "rm_auto_aim/detector/armor_detector_svm.hpp"
+#include "rm_auto_aim/detector/armor_detector_onnx.hpp"
 #include "rm_auto_aim/armor_detector_interface.hpp"
 
 #include <chrono>
 #include <memory>
 #include <string>
 
+using namespace std::chrono_literals;
 namespace rm_infantry
 {
     class AutoAimNode
@@ -47,6 +49,9 @@ namespace rm_infantry
         bool set_mode_cb(
             const std::shared_ptr<rm_interfaces::srv::SetMode::Request> request,
             std::shared_ptr<rm_interfaces::srv::SetMode::Response> response);
+        bool set_color_cb(
+            const std::shared_ptr<rm_interfaces::srv::SetColor::Request> request,
+            std::shared_ptr<rm_interfaces::srv::SetColor::Response> response);
 
     private:
         rclcpp::Node::SharedPtr node_;
@@ -59,13 +64,14 @@ namespace rm_infantry
         rclcpp::Publisher<rm_interfaces::msg::GimbalCmd>::SharedPtr gimbal_cmd_pub_;
         // ros srv
         rclcpp::Service<rm_interfaces::srv::SetMode>::SharedPtr set_mode_srv_;
-        rclcpp::Client<rm_interfaces::srv::GetColor>::SharedPtr get_color_cli_;
+        rclcpp::Service<rm_interfaces::srv::SetColor>::SharedPtr set_color_srv_;
 
         bool gimbal_ctrl_flag_{true};
         bool shoot_ctrl_flag_{true};
         int aim_mode=0x00;
         Eigen::Quaterniond curr_pose_;
         u_int8_t gimbal_cmd_id{0};
+        int color = 0xbb;
 
         std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
         int last_ret=0;

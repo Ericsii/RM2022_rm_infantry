@@ -1,0 +1,84 @@
+##若未设置udev权限，则需要进入root用户才能启动相机结点（除虚拟相机外）
+##相机
+mindvision_camera:
+    ros__parameters:
+        camera_name: 'mv_camera'
+        sn: '048021610069'
+        config_path: './rm_infantry/config/048021610069.Config'
+        camera_info_url: 'package://rm_infantry/config/048021610069.yaml'
+        fps: 200
+        best_effort_qos: true
+
+virtual_camera:
+    ros__parameters:
+        camera_name: 'virtual_camera'
+        sn: '048021610069'
+        config_path: './rm_infantry/config/048021610069.Config'
+        camera_info_url: 'package://rm_infantry/config/048021610069.yaml'
+        fps: 10
+        best_effort_qos: false
+        video_path: './master-base/rm_cam/resource/ood_red.mp4'
+
+daheng_camera:
+    ros__parameters:
+        camera_name: 'daheng_camera'
+        sn: 'KN0210040024'
+        config_path: './master-base/rm_cam/config/daheng_config/KN0210040024.txt'
+        lut_config_path: ''
+        lut_detail: [60., 2., 0.] # (!必须使用小数形式)对比度调节参数[-50-100] 伽马调节参数[0.1-10] 亮度调节参数[-150-150]
+        camera_k: [1552.7, 0.0, 640.0, 0.0, 1537.9, 360.0, 0.0, 0.0, 1.0]
+        camera_d: [0.0, 0.0, 0.0, 0.0, 0.0]
+        fps: 100
+        best_effort_qos: true
+
+##串口
+base:
+    ros__parameters:
+        serial_name: '/dev/ttySerial'
+        serial_send: true
+        serial_recv: true
+        serial_bps: 1152000
+        debug: false
+        custom_qos: true
+        imu_name: 'imu/data_raw'
+        gimbal_cmd_name: 'cmd_gimbal'
+        shoot_speed_name: 'shoot_speed'
+        set_service_name: ['auto_aim','nahsor']
+        
+##自瞄
+auto_aim:
+    ros__parameters:
+        armor_is_red: false 
+        camera_name: 'mv_camera'
+        imu_name: 'imu/data_raw'
+        xml_path: './contrib_modules/rm_auto_aim/resource/HOG_SVM.xml'
+        onnx_xml_path: './contrib_modules/rm_auto_aim/resource/lenet_with_negative.onnx'
+        best_effort_qos: true
+        auto_start: true
+        shoot_delay: 1.
+        shoot_speed_name: 'shoot_speed'
+        color_hsv: [150,0,0,  # red 1 
+                    170,255,255,
+                    0,0,0,     # red 2
+                    50,255,255, 
+                    6,0,100,    # blue 虽然没有用到
+                    120,255,255]
+
+imu_filter:
+  ros__parameters:
+    stateless: false
+    use_mag: true
+    publish_tf: true
+    reverse_tf: false
+    fixed_frame: "odom"
+    constant_dt: 0.0
+    publish_debug_topics: false
+    world_frame: "enu"
+    gain: 0.1
+    zeta: 0.0
+    mag_bias_x: 0.0
+    mag_bias_y: 0.0
+    mag_bias_z: 0.0
+    orientation_stddev: 0.0
+
+

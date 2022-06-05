@@ -1,6 +1,6 @@
-#include "rm_auto_aim/auto_aim_node.hpp"
+#include "rm_infantry/auto_aim_node.hpp"
 
-namespace rm_auto_aim
+namespace rm_infantry
 {
     AutoAimNode::AutoAimNode(const rclcpp::NodeOptions &options)
     {
@@ -9,18 +9,24 @@ namespace rm_auto_aim
         node_->declare_parameter("camera_name", "mv_camera");
         node_->declare_parameter("imu_name", "imu");
         node_->declare_parameter("auto_start", false);
+        node_->declare_parameter("gimbal_cmd_name", "cmd_gimbal");
 
+        auto gimbal_cmd_name = node_->get_parameter("gimbal_cmd_name").as_string();
         std::string camera_name = node_->get_parameter("camera_name").as_string();
         std::string imu_name = node_->get_parameter("imu_name").as_string();
-        bool armor_is_red = node_->get_parameter("armor_is_red").as_bool();
-        bool is_red = armor_is_red;
+        bool is_red = node_->get_parameter("armor_is_red").as_bool();
 
         using namespace std::placeholders;
         RCLCPP_INFO(node_->get_logger(), "Creating rcl pub&sub&client.");
         gimbal_cmd_pub_ = node_->create_publisher<rm_interfaces::msg::GimbalCmd>(
             "cmd_gimbal", 10);
+        
         set_mode_srv_ = node_->create_service<rm_interfaces::srv::SetMode>(
             "auto_aim/set_mode", std::bind(&AutoAimNode::set_mode_cb, this, _1, _2));
+
+        //获取本局颜色    
+        set_color_srv_ = node_->create_service<rm_interfaces::srv::SetColor>(
+            "auto_aim/set_color", std::bind(&AutoAimNode::set_color_cb, this, _1, _2));
 
         wrapper_client_ = std::make_shared<rm_cam::WrapperClient>(
             node_, camera_name, imu_name, std::bind(&AutoAimNode::process_fn, this, _1, _2, _3));
@@ -51,21 +57,21 @@ namespace rm_auto_aim
         // 初始化
         std::vector<double> camera_k(9, 0);
         std::copy_n(cam_info.k.begin(), 9, camera_k.begin());
-        std::shared_ptr<rm_auto_aim::ArmorDetector> detector = std::make_shared<rm_auto_aim::ArmorDetectorSVM>(node_,is_red);
-        auto_aim_algo_ = std::make_shared<rm_auto_aim::AutoAimAlgo>(node_, camera_k, cam_info.d, detector);
+        std::shared_ptr<rm_auto_aim::ArmorDetector> detector = std::make_shared<rm_auto_aim::ArmorDetectorSVM>(node_, is_red);
+        auto_aim_algo_ = std::make_shared<rm_infantry::AutoAimAlgo>(node_, camera_k, cam_info.d, detector);
         auto_aim_algo_->set_target_color(is_red);
         transform_tool_ = std::make_shared<rm_util::CoordinateTranslation>();
         measure_tool_ = std::make_shared<rm_util::MonoMeasureTool>(camera_k, cam_info.d);
 
-#ifdef RM_DEBUG_MODE
+        // #ifdef RM_DEBUG_MODE
         bool auto_start = node_->get_parameter("auto_start").as_bool();
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
-        if(auto_start)
+        if (auto_start)
         {
             aim_mode = 0x01;
             wrapper_client_->start();
         }
-#endif        
+        // #endif
         RCLCPP_INFO(
             node_->get_logger(),
             "Init finished.");
@@ -75,7 +81,7 @@ namespace rm_auto_aim
     {
         // 计算时间戳
         double time_stamp_ms = header.stamp.sec * 1e3 + header.stamp.nanosec * 1e-6;
-
+            
 #ifdef RM_DEBUG_MODE
         // tf2 发布当前姿态
         geometry_msgs::msg::TransformStamped pose_tf;
@@ -87,62 +93,84 @@ namespace rm_auto_aim
         pose_tf.transform.translation.z = 0.0;
         pose_tf.transform.rotation = q;
         tf_broadcaster_->sendTransform(pose_tf);
-
         RCLCPP_INFO(
             node_->get_logger(),
             "Get message");
 #endif
         // 姿态四元数
         curr_pose_ = Eigen::Quaterniond(q.w, q.x, q.y, q.z);
+        auto euler_angles = rm_util::CoordinateTranslation::quat2euler(curr_pose_);
+        float c_pitch, c_yaw, c_roll;
+        c_pitch = rm_util::rad_to_deg(euler_angles(0));
+        c_yaw = rm_util::rad_to_deg(euler_angles(2));
+        c_roll = rm_util::rad_to_deg(euler_angles(1));
+        (void)c_roll;
         // 装甲板识别
         int ret = auto_aim_algo_->process(time_stamp_ms, img, curr_pose_, aim_mode);
 
+        rm_interfaces::msg::GimbalCmd gimbal_cmd;
+        gimbal_cmd.id = gimbal_cmd_id++;
+        gimbal_cmd.position.pitch = c_pitch;
+        gimbal_cmd.position.yaw = c_yaw;
+        
         if (!ret)
         {
-            float offset_pitch, offset_yaw;
-            offset_pitch = auto_aim_algo_->mTarget_pitch;
-            offset_yaw = auto_aim_algo_->mTarget_yaw;
+            float target_pitch, target_yaw;
+            target_pitch = auto_aim_algo_->getTargetPitch();
+            target_yaw = auto_aim_algo_->getTargetYaw();
 
 #ifdef RM_DEBUG_MODE
             /* 仅从图像2D坐标进行目标跟踪
              auto target = auto_aim_algo_->getTarget();
-             measure_tool_->calc_view_angle(target.armorDescriptor.centerPoint, offset_pitch, offset_yaw);
-             offset_pitch = rm_util::rad_to_deg(auto_aim_algo_->mTarget_pitch);
-             offset_yaw = rm_util::rad_to_deg(auto_aim_algo_->mTarget_yaw); */
-            auto euler_angles = rm_util::CoordinateTranslation::quat2euler(curr_pose_);
-            float c_pitch, c_yaw;
-            c_pitch = rm_util::rad_to_deg(euler_angles(1));
-            c_yaw = rm_util::rad_to_deg(euler_angles(0));
-
+             measure_tool_->calc_view_angle(target.armorDescriptor.centerPoint, target_pitch, target_yaw);
+             target_pitch = rm_util::rad_to_deg(auto_aim_algo_->mTarget_pitch);
+             target_yaw = rm_util::rad_to_deg(auto_aim_algo_->mTarget_yaw); */
             RCLCPP_INFO(
                 node_->get_logger(),
-                "c_pitch: %f, c_yaw: %f", c_pitch, c_yaw);
+                "c_pitch: %f, c_yaw: %f, c_roll: %f", c_pitch, c_yaw, c_roll);
             RCLCPP_INFO(
                 node_->get_logger(),
-                "offset_pitch: %f, offset_yaw: %f", offset_pitch, offset_yaw);
+                "target_pitch: %f, target_yaw: %f", target_pitch, target_yaw);
 #endif
 
             if (this->gimbal_ctrl_flag_)
             {
-                rm_interfaces::msg::GimbalCmd gimbal_cmd;
-                gimbal_cmd.id = gimbal_cmd_id++;
-                gimbal_cmd.position.pitch = offset_pitch;
-                gimbal_cmd.position.yaw = -offset_yaw;
+                gimbal_cmd.position.pitch = target_pitch;
+                gimbal_cmd.position.yaw = target_yaw;
                 gimbal_cmd_pub_->publish(gimbal_cmd);
             }
         }
         else
         {
-            rm_interfaces::msg::GimbalCmd gimbal_cmd;
-            gimbal_cmd.id = gimbal_cmd_id++;
-            gimbal_cmd.type = 0x3a;
-            gimbal_cmd_pub_->publish(gimbal_cmd);
+            if (this->gimbal_ctrl_flag_)
+                gimbal_cmd_pub_->publish(gimbal_cmd);
 #ifdef RM_DEBUG_MODE
             RCLCPP_INFO(
                 node_->get_logger(),
                 "No armors");
-#endif 
+#endif
         }
+    }
+
+    bool AutoAimNode::set_color_cb(
+        const std::shared_ptr<rm_interfaces::srv::SetColor::Request> request,
+        std::shared_ptr<rm_interfaces::srv::SetColor::Response> response)
+    {
+        response->success = true;
+        this->color = request->color;
+        // wrapper_client_->stop();
+        if (this->color == 0xbb)
+        {
+            auto_aim_algo_->set_target_color(false);
+            RCLCPP_INFO(node_->get_logger(), "set target Color【BLUE】!");
+        }
+        else
+        {
+            auto_aim_algo_->set_target_color(true);
+            RCLCPP_INFO(node_->get_logger(), "set target Color【RED】!");
+        }
+        // wrapper_client_->start();
+        return true;
     }
 
     bool AutoAimNode::set_mode_cb(
@@ -186,11 +214,11 @@ namespace rm_auto_aim
         }
         return true;
     }
-} // namespace rm_auto_aim
+} // namespace rm_infantry
 
 #include "rclcpp_components/register_node_macro.hpp"
 
 // Register the component with class_loader.
 // This acts as a sort of entry point, allowing the component to be discoverable when its library
 // is being loaded into a running process.
-RCLCPP_COMPONENTS_REGISTER_NODE(rm_auto_aim::AutoAimNode)
+RCLCPP_COMPONENTS_REGISTER_NODE(rm_infantry::AutoAimNode)

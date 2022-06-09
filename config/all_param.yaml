@@ -3,7 +3,7 @@
 mindvision_camera:
     ros__parameters:
         camera_name: 'mv_camera'
-        sn: '048021610069'
+        sn: '049080710063'
         config_path: './rm_infantry/config/048021610069.Config'
         camera_info_url: 'package://rm_infantry/config/048021610069.yaml'
         fps: 200

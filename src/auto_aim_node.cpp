@@ -184,7 +184,7 @@ namespace rm_infantry
         switch (request->mode)
         {
         case 0x00:
-            wrapper_client_->stop();
+            // wrapper_client_->stop();
             break;
         case 0x01:
             gimbal_ctrl_flag_ = true;
@@ -205,7 +205,7 @@ namespace rm_infantry
             auto_aim_algo_->set_target_color(true);
             RCLCPP_INFO(node_->get_logger(), "set target color red");
             break;
-        case 0x11:
+        case 0xbb:
             auto_aim_algo_->set_target_color(false);
             RCLCPP_INFO(node_->get_logger(), "set target color blue");
             break;

@@ -37,6 +37,11 @@ namespace rm_infantry
         cam_point_pub_ = node_->create_publisher<geometry_msgs::msg::PointStamped>(
             "camera/clicked_point", 10);
 
+        node_->declare_parameter("yaw_offset", -2.);
+        node_->get_parameter("yaw_offset", yaw_offset);
+        node_->declare_parameter("pitch_offset", 0.);
+        node_->get_parameter("pitch_offset", pitch_offset);
+
         node_->declare_parameter("shoot_delay", 1.);
         node_->get_parameter("shoot_delay", shoot_delay);
         node_->declare_parameter("shoot_speed_name", "shoot_speed");
@@ -45,20 +50,16 @@ namespace rm_infantry
                 shoot_speed_name,
                 10,
                 std::bind(&AutoAimAlgo::shoot_speed_cb, this, std::placeholders::_1));
-
+                
+        double fliter_Q=5000. , fliter_R=0.01;
+        node_->declare_parameter("fliter_Q", fliter_Q);
+        node_->get_parameter("fliter_Q", fliter_R);
+        node_->declare_parameter("fliter_R", fliter_R);
+        node_->get_parameter("fliter_Q", fliter_R);
         Eigen::MatrixXd Q(6, 6);
-        Q = Eigen::MatrixXd::Identity(6, 6) * 5000;
-        // Q << 0.01, 0, 0, 0, 0, 0,
-        //     0, 0.01, 0, 0, 0, 0,
-        //     0, 0, 0.01, 0, 0, 0,
-        //     0, 0, 0, 0.01, 0, 0,
-        //     0, 0, 0, 0, 0.01, 0,
-        //     0, 0, 0, 0, 0, 0.01;
+        Q = Eigen::MatrixXd::Identity(6, 6) * fliter_Q;
         Eigen::MatrixXd R(3, 3);
-        // R = Eigen::MatrixXd::Identity(3, 3) * 0.01;
-        R << 0.01, 0, 0,
-            0, 0.01, 0,
-            0, 0, 0.01;
+        R = Eigen::MatrixXd::Identity(3, 3) * fliter_R;
 
         std::stringstream ss;
         ss << "Kalman param: " << std::endl;
@@ -89,13 +90,32 @@ namespace rm_infantry
         cam2imu_static_ = Eigen::Quaterniond(rotation);
 
         // 弹道解算器
-        gimbal_solver_ = std::make_shared<rm_trajectory::GravityNofrictionSolver>(20.);
-        transform_tool_ = std::make_shared<rm_trajectory::TransformTool>(gimbal_solver_);
+        gimbal_solver_ = std::make_shared<rm_trajectory::GravityNofrictionSolver>(30.);
+        gravity_solver_ = std::make_shared<rm_trajectory::GravitySolver>(30., 0.03); 
+        trajectory_transform_tool_ = std::make_shared<rm_trajectory::TransformTool>(gravity_solver_);
+    }
+
+    rm_interfaces::msg::ShootSpeed AutoAimAlgo::get_shoot_speed()
+    {
+        std::lock_guard<std::mutex> lock(shoot_speed_mutex_);
+        return shoot_speed;
+    }
+
+    void AutoAimAlgo::set_shoot_speed(const rm_interfaces::msg::ShootSpeed::SharedPtr shoot_speed_temp)
+    {
+        std::lock_guard<std::mutex> lock(shoot_speed_mutex_);
+        shoot_speed = *shoot_speed_temp;
     }
 
     void AutoAimAlgo::shoot_speed_cb(const rm_interfaces::msg::ShootSpeed::SharedPtr shoot_speed_msg_temp)
     {
-        gimbal_solver_->set_initial_vel(shoot_speed_msg_temp->shoot_speed);
+        set_shoot_speed(shoot_speed_msg_temp);
+        gravity_solver_->set_initial_vel(shoot_speed_msg_temp->shoot_speed);
+        trajectory_transform_tool_ = std::make_shared<rm_trajectory::TransformTool>(gravity_solver_);
+        initial_vel = shoot_speed_msg_temp->shoot_speed;
+// #ifdef RM_DEBUG_MODE
+        RCLCPP_INFO(node_->get_logger(), "initial_vel: %f", initial_vel);
+// #endif
     }
 
     int AutoAimAlgo::process(double time_stamp, cv::Mat &src, Eigen::Quaterniond pose, int aim_mode)
@@ -139,11 +159,11 @@ namespace rm_infantry
         // std::cout << "process: "<< ret << std::endl;
         if (ret != 0)
         {
-#ifdef RM_DEBUG_MODE
+// #ifdef RM_DEBUG_MODE
             cv::Mat debugImg = src;
             cv::imshow("target", debugImg);
             cv::waitKey(1);
-#endif
+// #endif
             return 1; // 无目标
         }
         auto armor_descriptors = armor_detector_->getArmorVector();
@@ -318,7 +338,7 @@ namespace rm_infantry
         // step5.反小陀螺
         end_pre = "normal";
         aim_range = 0;
-        double world_pitch = rm_util::rad_to_deg(atan2(position3d_world(2, 0), sqrt(pow(position3d_world(0, 0), 2) + pow(position3d_world(1, 0), 2))));
+        double world_pitch = rm_util::rad_to_deg(atan2(position3d_world(2, 0)+10, sqrt(pow(position3d_world(0, 0), 2) + pow(position3d_world(1, 0), 2))));
         double world_yaw = -rm_util::rad_to_deg(atan2(position3d_world(0, 0), position3d_world(1, 0)));
         (void)world_pitch;
         if (aim_mode == 0x11 && same_id && mTarget.armorDescriptor.label)
@@ -378,26 +398,19 @@ namespace rm_infantry
         }
 
         /* pitch抬枪补偿 (单位：cm)*/
+        Eigen::Vector3d position3d_shoot(filter_position3d_world);
+        position3d_shoot(2, 0) += pitch_offset;
+
         //【枪口弹道偏移】弹道模型拟合方式
-        auto gravity_solver = std::make_shared<rm_trajectory::GravitySolver>(initial_vel, 0.03); 
-        auto trajectory_transform_tool = std::make_shared<rm_trajectory::TransformTool>(gravity_solver);
-        trajectory_transform_tool->solve(filter_position3d_world, pre_target_pitch,pre_target_yaw);
-        // gimbal_solver_->set_initial_vel(initial_vel);
-        // transform_tool_->solve(filter_position3d_world, pre_target_pitch,pre_target_yaw);
+        trajectory_transform_tool_->solve(position3d_shoot, pre_target_pitch,pre_target_yaw);
 
         // 【枪口弹道偏移】rmoss方式
         // double pitch_temp = 0, yaw_temp = 0;
-        // Eigen::Vector3d position3d_shoot(filter_position3d_world);
-        // position3d_shoot(2, 0) += 5;
-        // if(position3d_shoot(1,0)>300 && position3d_shoot(2,0)>0)
-        //     position3d_shoot(2, 0) += 5*target_distance/100;
-        // else if(position3d_shoot(2,0)<0)
-        //     position3d_shoot(2, 0) += 6*target_distance/100;
         // RCLCPP_INFO(node_->get_logger(), "target_x: %f, target_y: %f, target_z: %f",position3d_world(0), position3d_world(1), position3d_world(2));
         // position3d_shoot(0, 0) *= 0.01;
         // position3d_shoot(1, 0) *= 0.01;
         // position3d_shoot(2, 0) *= 0.01;
-        // transform_tool_->solve(position3d_shoot, pitch_temp, yaw_temp);
+        // trajectory_transform_tool_->solve(position3d_shoot, pitch_temp, yaw_temp);
         // pre_target_pitch = rm_util::rad_to_deg(pitch_temp); //此处得到的是绝对姿态pitch
         // pre_target_yaw = rm_util::rad_to_deg(yaw_temp);
 
@@ -422,7 +435,8 @@ namespace rm_infantry
             // else if (end_pre == "left")
             //     mTarget_yaw = float(pre_target_yaw) + aim_range;
             // else
-            mTarget_yaw = pre_target_yaw;
+            mTarget_yaw = pre_target_yaw + yaw_offset;
+            RCLCPP_INFO(node_->get_logger(), "mTarget_pitch: %f, mTarget_yaw: %f", mTarget_pitch, mTarget_yaw);
         }
 
         // debug输出
@@ -437,15 +451,13 @@ namespace rm_infantry
         RCLCPP_INFO(node_->get_logger(), "[world] target_x: %f, target_y: %f, target_z: %f", filter_position3d_world(0, 0), filter_position3d_world(1, 0), filter_position3d_world(2, 0));
         RCLCPP_INFO(node_->get_logger(), "[camera] target_x: %f, target_y: %f, target_z: %f", pre_camera(0, 0), pre_camera(1, 0), pre_camera(2, 0));
 
-        RCLCPP_INFO(node_->get_logger(), "mTarget_pitch: %f, mTarget_yaw: %f", mTarget_pitch, mTarget_yaw);
-
         RCLCPP_INFO(node_->get_logger(), "time: %f", time);
         time_bet = (time_bet + time) / 2;
         RCLCPP_INFO(node_->get_logger(), "平均时间间隔: %f ，fps: %f", time_bet, 1000.0 / time_bet);
         RCLCPP_INFO(node_->get_logger(), "旋转周期：%f", auto_aim_time[0]);
         RCLCPP_INFO(node_->get_logger(), "上一次装甲板面积最大时刻：%f", auto_aim_time[2]);
-
-                cv::Mat debugImg = src;
+#endif
+        cv::Mat debugImg = src;
         cv::putText(debugImg,
                     std::to_string(int(target_distance)),
                     mTarget.armorDescriptor.points[0],
@@ -468,7 +480,7 @@ namespace rm_infantry
         cv::circle(debugImg, {int(pre_img(0, 0)), int(pre_img(1, 0))}, 5, {255, 255, 0}, 3);
         cv::imshow("target", debugImg);
         cv::waitKey(1);
-#endif
+
         // 发布滤波后的目标点的位置信息
         geometry_msgs::msg::PointStamped cam_target_point;
         cam_target_point.point.x = filter_position3d_world(0, 0) / 100;

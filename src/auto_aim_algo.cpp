@@ -276,7 +276,7 @@ namespace rm_infantry
             if (big_armor)
                 break;
         }
-        if (!same_armor && (time_stamp < (time_lost + 20)))
+        if (!same_armor && (time_stamp < (time_lost + 30)))
             position3d_world = last_position3d_world;
         else
             time_lost = 0;
@@ -420,7 +420,7 @@ namespace rm_infantry
         cv::circle(debugImg, {int(pre_img(0, 0)), int(pre_img(1, 0))}, 5, {255, 255, 0}, 3);
         cv::imshow("target", debugImg);
         cv::waitKey(1);
-
+#endif
         // 发布滤波后的目标点的位置信息
         geometry_msgs::msg::PointStamped cam_target_point;
         cam_target_point.point.x = filter_position3d_world(0, 0) / 100;
@@ -436,7 +436,6 @@ namespace rm_infantry
         target_point.point.z = position3d_world(2, 0) / 100;
         target_point.header.frame_id = "imu_link";
         point_pub_->publish(target_point);
-#endif
 
         last_time = time_stamp;
         last_label = mTarget.armorDescriptor.label;

@@ -17,6 +17,7 @@ find_package(rm_util REQUIRED)
 find_package(rm_filters REQUIRED)
 find_package(rm_trajectory REQUIRED)
 find_package(rm_auto_aim REQUIRED)
+find_package(rm_nahsor REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_components REQUIRED)
 find_package(OpenCV REQUIRED)
@@ -39,6 +40,7 @@ add_library(${PROJECT_NAME} SHARED
 set(dependencies
   OpenCV
   rm_interfaces
+  rm_nahsor
   rm_cam
   rm_util
   rm_filters

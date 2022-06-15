@@ -48,25 +48,66 @@ base:
 ##自瞄
 auto_aim:
     ros__parameters:
-        armor_is_red: true 
+        armor_is_red: false 
         camera_name: 'mv_camera'
         imu_name: 'imu/data_raw'
         xml_path: './contrib_modules/rm_auto_aim/resource/HOG_SVM.xml'
         onnx_xml_path: './contrib_modules/rm_auto_aim/resource/lenet_with_negative.onnx'
         best_effort_qos: true
         auto_start: true
-        shoot_delay: 1.
+        shoot_delay: 0.5
         shoot_speed_name: 'shoot_speed'
-        color_hsv: [150,0,0,  # red 1 
-                    170,255,255,
-                    0,0,0,     # red 2
-                    50,255,255, 
-                    6,0,100,    # blue 虽然没有用到
-                    120,255,255]
-        pitch_offset: 10.
-        yaw_offset: 1.
+        color_hsv: [140,150,150,  # red 1 
+                    180,180,180,
+                    0,150,150,     # red 2
+                    60,180,180, 
+                    2,4,
+                    5,5,
+                    2,8]
+        x_offset: 0.
+        y_offset: 0.
+        z_offset: 8.
+        pitch_offset: 0.
+        yaw_offset: 0.5
         fliter_Q: 5000.
         fliter_R: 0.01
+        shoot_air_param: 0.005
+
+##能量机关
+nahsor_node:
+    ros__parameters:
+        # armor_is_red: true
+        camera_name: "mv_camera"
+        imu_name: "imu/data_raw"
+        best_effort_qos: true
+        color: "red"
+        auto_start: false
+        shoot_delay: 0.35
+        yaw_offset: 0.
+        pitch_offset: 1.
+        small_v: 2.5
+        
+        # 图像处理的阈值
+        dilate_size: 4
+        core_size: 3
+        erode_size: 2
+        low_red: [156., 100., 130.]
+        up_red: [180., 255., 255.]
+        low_red2: [0., 100., 130.]
+        up_red2: [34., 255., 255.]
+        low_blue: [80., 150., 180.]
+        up_blue: [124., 255., 255.]
+        armor_size_thre_: [500., 1000.]
+        R_size_thre_: [400., 800.]
+        max_r_angle_: 0.3
+
+record_node:
+  ros__parameters:
+    camera_name: 'mv_camera'
+    best_effort_qos: true
+    fps: 30
+    video_dir: './record'
+    frame_per_file: 2000
 
 imu_filter:
   ros__parameters:

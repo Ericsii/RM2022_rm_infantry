@@ -18,8 +18,9 @@ namespace rm_infantry
 
         using namespace std::placeholders;
         RCLCPP_INFO(node_->get_logger(), "Creating rcl pub&sub&client.");
+        rclcpp::QoS gimbal_cmd_sub_qos_profile(rclcpp::KeepLast(1), best_effort_qos_policy);
         gimbal_cmd_pub_ = node_->create_publisher<rm_interfaces::msg::GimbalCmd>(
-            "cmd_gimbal", 10);
+            "cmd_gimbal", gimbal_cmd_sub_qos_profile);
         
         set_mode_srv_ = node_->create_service<rm_interfaces::srv::SetMode>(
             "auto_aim/set_mode", std::bind(&AutoAimNode::set_mode_cb, this, _1, _2));
@@ -159,15 +160,16 @@ namespace rm_infantry
         response->success = true;
         this->color = request->color;
         // wrapper_client_->stop();
+        //color is our color
         if (this->color == 0xbb)
-        {
-            auto_aim_algo_->set_target_color(false);
-            RCLCPP_INFO(node_->get_logger(), "set target Color【BLUE】!");
-        }
-        else
         {
             auto_aim_algo_->set_target_color(true);
             RCLCPP_INFO(node_->get_logger(), "set target Color【RED】!");
+        }
+        else
+        {
+            auto_aim_algo_->set_target_color(false);
+            RCLCPP_INFO(node_->get_logger(), "set target Color【BLUE】!");
         }
         // wrapper_client_->start();
         return true;
@@ -187,6 +189,11 @@ namespace rm_infantry
             // wrapper_client_->stop();
             break;
         case 0x01:
+            gimbal_ctrl_flag_ = true;
+            shoot_ctrl_flag_ = true;
+            wrapper_client_->start();
+            break;
+        case 0x11:
             gimbal_ctrl_flag_ = true;
             shoot_ctrl_flag_ = true;
             wrapper_client_->start();

@@ -25,6 +25,7 @@
   <depend>rm_filters</depend>
   <depend>rm_trajectory</depend>
   <depend>rm_auto_aim</depend>
+  <depend>rm_nahsor</depend>
 
   <depend>tf2</depend>
   <depend>tf2_ros</depend>

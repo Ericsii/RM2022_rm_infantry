@@ -1,4 +1,6 @@
 #rm_infantry 步兵自瞄部分
+nano ./.git/config
+改为ssh
 TODO:反小陀螺算法待开发
         end_pre = "normal";
         aim_range = 0;

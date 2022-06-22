@@ -21,11 +21,11 @@ namespace rm_infantry
         rclcpp::QoS gimbal_cmd_sub_qos_profile(rclcpp::KeepLast(1), best_effort_qos_policy);
         gimbal_cmd_pub_ = node_->create_publisher<rm_interfaces::msg::GimbalCmd>(
             "cmd_gimbal", gimbal_cmd_sub_qos_profile);
-        
+
         set_mode_srv_ = node_->create_service<rm_interfaces::srv::SetMode>(
             "auto_aim/set_mode", std::bind(&AutoAimNode::set_mode_cb, this, _1, _2));
 
-        //获取本局颜色    
+        //获取本局颜色
         set_color_srv_ = node_->create_service<rm_interfaces::srv::SetColor>(
             "auto_aim/set_color", std::bind(&AutoAimNode::set_color_cb, this, _1, _2));
 
@@ -64,7 +64,7 @@ namespace rm_infantry
         transform_tool_ = std::make_shared<rm_util::CoordinateTranslation>();
         measure_tool_ = std::make_shared<rm_util::MonoMeasureTool>(camera_k, cam_info.d);
 
-        // #ifdef RM_DEBUG_MODE
+#ifdef RM_DEBUG_MODE
         bool auto_start = node_->get_parameter("auto_start").as_bool();
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node_);
         if (auto_start)
@@ -72,7 +72,7 @@ namespace rm_infantry
             aim_mode = 0x01;
             wrapper_client_->start();
         }
-        // #endif
+#endif
         RCLCPP_INFO(
             node_->get_logger(),
             "Init finished.");
@@ -82,7 +82,7 @@ namespace rm_infantry
     {
         // 计算时间戳
         double time_stamp_ms = header.stamp.sec * 1e3 + header.stamp.nanosec * 1e-6;
-            
+
 #ifdef RM_DEBUG_MODE
         // tf2 发布当前姿态
         geometry_msgs::msg::TransformStamped pose_tf;
@@ -107,13 +107,13 @@ namespace rm_infantry
         c_roll = rm_util::rad_to_deg(euler_angles(1));
         (void)c_roll;
         // 装甲板识别
-        int ret = auto_aim_algo_->process(time_stamp_ms, img, curr_pose_, aim_mode);
+        int ret = auto_aim_algo_->process(time_stamp_ms, img, curr_pose_);
 
         rm_interfaces::msg::GimbalCmd gimbal_cmd;
         gimbal_cmd.id = gimbal_cmd_id++;
         gimbal_cmd.position.pitch = c_pitch;
         gimbal_cmd.position.yaw = c_yaw;
-        
+
         if (!ret)
         {
             float target_pitch, target_yaw;
@@ -160,7 +160,7 @@ namespace rm_infantry
         response->success = true;
         this->color = request->color;
         // wrapper_client_->stop();
-        //color is our color
+        // color is our color
         if (this->color == 0xbb)
         {
             auto_aim_algo_->set_target_color(true);
@@ -180,41 +180,36 @@ namespace rm_infantry
         std::shared_ptr<rm_interfaces::srv::SetMode::Response> response)
     {
         // 0x00,休眠模式，0x01:自动射击模式，0x02：自动瞄准模式（不发子弹）,0x03,测试模式,不控制.
-        // 0x10,设置目标为红色，0x11,设置目标为蓝色
+        // 0xaa,击打哨兵模式（纳入label为0装甲板）
         response->success = true;
-        aim_mode = request->mode;
+        auto_aim_algo_->set_aim_mode(int(request->mode));
         switch (request->mode)
         {
         case 0x00:
-            // wrapper_client_->stop();
+            wrapper_client_->stop();
+            RCLCPP_INFO(node_->get_logger(), "【normal】!");
             break;
         case 0x01:
             gimbal_ctrl_flag_ = true;
             shoot_ctrl_flag_ = true;
             wrapper_client_->start();
+            RCLCPP_INFO(node_->get_logger(), "【auto aim】!");
             break;
-        case 0x11:
+        case 0xaa:
             gimbal_ctrl_flag_ = true;
             shoot_ctrl_flag_ = true;
             wrapper_client_->start();
-            break;
-        case 0x02:
-            gimbal_ctrl_flag_ = true;
-            shoot_ctrl_flag_ = false;
-            wrapper_client_->start();
-            break;
-        case 0x03:
-            gimbal_ctrl_flag_ = false;
-            shoot_ctrl_flag_ = false;
-            wrapper_client_->start();
-            break;
-        case 0x10:
-            auto_aim_algo_->set_target_color(true);
-            RCLCPP_INFO(node_->get_logger(), "set target color red");
+            RCLCPP_INFO(node_->get_logger(), "【sentry】!");
             break;
         case 0xbb:
-            auto_aim_algo_->set_target_color(false);
-            RCLCPP_INFO(node_->get_logger(), "set target color blue");
+            gimbal_ctrl_flag_ = false;
+            shoot_ctrl_flag_ = false;
+            wrapper_client_->stop();
+            break;
+        case 0xcc:
+            gimbal_ctrl_flag_ = false;
+            shoot_ctrl_flag_ = false;
+            wrapper_client_->stop();
             break;
         default:
             response->success = false;

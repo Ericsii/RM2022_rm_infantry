@@ -85,11 +85,11 @@ namespace rm_infantry
          */
         void setTrack(bool is_track);
 
-        int process(double time_stamp_ms, cv::Mat &src, Eigen::Quaterniond pose, int aim_mode);
         bool is_same_armor(Eigen::Vector3d old_position3d, Eigen::Vector3d now_position3d, double distance_threshold);
         void shoot_speed_cb(const rm_interfaces::msg::ShootSpeed::SharedPtr shoot_speed_msg_temp);
         rm_interfaces::msg::ShootSpeed get_shoot_speed();
         void set_shoot_speed(const rm_interfaces::msg::ShootSpeed::SharedPtr shoot_speed_temp);
+        void set_aim_mode(int aim_mode);
 
     private:
         rclcpp::Node::SharedPtr node_;                                  // rclcpp 节点
@@ -142,6 +142,7 @@ namespace rm_infantry
         std::string end_pre = "normal"; // normal right left
 
         rm_interfaces::msg::ShootSpeed shoot_speed;
+        int aim_mode=0x01;
         std::mutex shoot_speed_mutex_;
     };
 } // namespace rm_infantry

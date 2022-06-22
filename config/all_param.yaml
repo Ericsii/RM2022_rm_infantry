@@ -66,10 +66,11 @@ auto_aim:
                     2,8]
         x_offset: 0.
         y_offset: 0.
-        z_offset: 8.
-        pitch_offset: -2.5
-        yaw_offset: 0.5
-        fliter_Q: 5000.
+        z_offset: 0.
+        pitch_offset: 0.0
+        yaw_offset: -2.0
+        fliter_p: 5000.0
+        fliter_v: 5000.0
         fliter_R: 0.01
         shoot_air_param: 0.005
 

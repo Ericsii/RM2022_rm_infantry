@@ -24,6 +24,7 @@
 #include "rm_auto_aim/detector/armor_detector_svm.hpp"
 #include "rm_auto_aim/detector/armor_detector_onnx.hpp"
 #include "rm_auto_aim/armor_detector_interface.hpp"
+#include "rm_interfaces/qos_policy.hpp"
 
 #include <chrono>
 #include <memory>

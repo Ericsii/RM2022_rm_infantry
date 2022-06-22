@@ -19,6 +19,8 @@ def generate_launch_description():
         autoaim_params = yaml.safe_load(f)['auto_aim']['ros__parameters']
     with open(param_path, 'r') as f:
         nahsor_params = yaml.safe_load(f)['nahsor_node']['ros__parameters']
+    with open(param_path, 'r') as f:
+        record_params = yaml.safe_load(f)['record_node']['ros__parameters']
 
     #创建容器
     rm_container = Node(
@@ -61,6 +63,15 @@ def generate_launch_description():
         ]
     )
     
+    record_node = Node(
+        package='record_node',
+        executable="video_record",
+        namespace=robot_name,
+        name='record_node',
+        parameters=[param_path],
+        output='screen'
+    )
+
     ld = LaunchDescription()
     ld.add_action(load_compose)
     ld.add_action(rm_container)

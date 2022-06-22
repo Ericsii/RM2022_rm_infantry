@@ -55,20 +55,22 @@ namespace rm_infantry
         sigma_p = sigma_p * sigma_p;
         sigma_v = sigma_v * sigma_v;
         Q << sigma_p, 0., 0., 0., 0., 0.,
-		0., sigma_p, 0., 0., 0., 0.,
-		0., 0., sigma_p, 0., 0., 0.,
-		0., 0., 0., sigma_v, 0., 0.,
-		0., 0., 0., 0., sigma_v, 0.,
-		0., 0., 0., 0., 0., sigma_v;
+            0., sigma_p, 0., 0., 0., 0.,
+            0., 0., sigma_p, 0., 0., 0.,
+            0., 0., 0., sigma_v, 0., 0.,
+            0., 0., 0., 0., sigma_v, 0.,
+            0., 0., 0., 0., 0., sigma_v;
 
         Eigen::MatrixXd R(3, 3);
         R = Eigen::MatrixXd::Identity(3, 3) * fliter_R;
 
         std::stringstream ss;
         ss << "Kalman param: " << std::endl;
-        ss << "Q = " << std::endl << Q << std::endl;
-        ss << "R = " << std::endl << R << std::endl;
-        RCLCPP_INFO(node_->get_logger(),"%s", ss.str().c_str());
+        ss << "Q = " << std::endl
+           << Q << std::endl;
+        ss << "R = " << std::endl
+           << R << std::endl;
+        RCLCPP_INFO(node_->get_logger(), "%s", ss.str().c_str());
 
         auto ekf = std::make_shared<rm_filters::ExKalmanFilter>(6, 3, 0, Q, R); // 构造扩展卡尔曼滤波器
         ekf->base_state = rm_filters::MState::const_acc;
@@ -176,11 +178,11 @@ namespace rm_infantry
         ret = armor_detector_->process(src);
         if (ret != 0)
         {
-// #ifdef RM_DEBUG_MODE
+#ifdef RM_DEBUG_MODE
             cv::Mat debugImg = src;
             cv::imshow("target", debugImg);
             cv::waitKey(1);
-// #endif
+#endif
             return 1; // 无目标
         }
         auto armor_descriptors = armor_detector_->getArmorVector();
@@ -337,7 +339,6 @@ namespace rm_infantry
             filter_position3d_world(0, 0) = z_k(0, 0) + x_k(3, 0) * predict_time;
             filter_position3d_world(1, 0) = z_k(1, 0) + x_k(4, 0) * predict_time;
             filter_position3d_world(2, 0) = z_k(2, 0) + x_k(5, 0) * predict_time;
-            
 
 #ifdef RM_DEBUG_MODE
             RCLCPP_INFO(node_->get_logger(), "【速度】 v_x: %f, v_y: %f, v_z: %f", x_k(3, 0), x_k(4, 0), x_k(5, 0));
@@ -371,13 +372,32 @@ namespace rm_infantry
             mTarget_pitch = pre_target_pitch + pitch_offset;
             mTarget_yaw = -(pre_target_yaw + yaw_offset); //由于与电控的yaw方向相反
         }
-        
+
         // 【世界->相机】滤波后目标世界坐标系--->在相机坐标系下的坐标
         Eigen::Vector3d pre_camera;
         pre_camera(0, 0) = filter_position3d_world(0, 0);
         pre_camera(1, 0) = filter_position3d_world(1, 0);
         pre_camera(2, 0) = filter_position3d_world(2, 0);
-        pre_camera = cam2imu_static_.inverse() * imu_q.inverse() * (pre_camera-offset_shoot);
+        pre_camera = cam2imu_static_.inverse() * imu_q.inverse() * (pre_camera - offset_shoot);
+
+        // debug输出
+#ifdef RM_DEBUG_MODE
+        RCLCPP_INFO(node_->get_logger(), "\n------------滤波后：------------");
+        RCLCPP_INFO(node_->get_logger(), "target_pitch: %f, target_yaw: %f", target_pitch, target_yaw);
+        RCLCPP_INFO(node_->get_logger(), "world_pitch: %f, world_yaw: %f", world_pitch, world_yaw);
+        RCLCPP_INFO(node_->get_logger(), "c_pitch: %f, c_yaw: %f", c_pitch, c_yaw);
+        RCLCPP_INFO(node_->get_logger(), "pre_target_height: %f, pre_target_pitch: %f, pre_target_yaw: %f", pre_target_height, pre_target_pitch, pre_target_yaw);
+        RCLCPP_INFO(node_->get_logger(), "error: %s", transform_tool_->error_message().c_str());
+        RCLCPP_INFO(node_->get_logger(), "[shoot] target_x: %f, target_y: %f, target_z: %f", position3d_shoot(0, 0), position3d_shoot(1, 0), position3d_shoot(2, 0));
+
+        RCLCPP_INFO(node_->get_logger(), "[world] target_x: %f, target_y: %f, target_z: %f", filter_position3d_world(0, 0), filter_position3d_world(1, 0), filter_position3d_world(2, 0));
+        RCLCPP_INFO(node_->get_logger(), "[camera] target_x: %f, target_y: %f, target_z: %f", pre_camera(0, 0), pre_camera(1, 0), pre_camera(2, 0));
+
+        RCLCPP_INFO(node_->get_logger(), "time: %f", time);
+        time_bet = (time_bet + time) / 2;
+        RCLCPP_INFO(node_->get_logger(), "平均时间间隔: %f ，fps: %f", time_bet, 1000.0 / time_bet);
+        RCLCPP_INFO(node_->get_logger(), "旋转周期：%f", auto_aim_time[0]);
+        RCLCPP_INFO(node_->get_logger(), "上一次装甲板面积最大时刻：%f", auto_aim_time[2]);
 
         cv::Mat debugImg = src;
         cv::putText(debugImg,
@@ -402,25 +422,6 @@ namespace rm_infantry
         cv::circle(debugImg, {int(pre_img(0, 0)), int(pre_img(1, 0))}, 5, {255, 255, 0}, 3);
         cv::imshow("target", debugImg);
         cv::waitKey(1);
-     
-        // debug输出
-#ifdef RM_DEBUG_MODE
-        RCLCPP_INFO(node_->get_logger(), "\n------------滤波后：------------");
-        RCLCPP_INFO(node_->get_logger(), "target_pitch: %f, target_yaw: %f", target_pitch, target_yaw);
-        RCLCPP_INFO(node_->get_logger(), "world_pitch: %f, world_yaw: %f", world_pitch, world_yaw);
-        RCLCPP_INFO(node_->get_logger(), "c_pitch: %f, c_yaw: %f", c_pitch, c_yaw);
-        RCLCPP_INFO(node_->get_logger(), "pre_target_height: %f, pre_target_pitch: %f, pre_target_yaw: %f", pre_target_height, pre_target_pitch, pre_target_yaw);
-       RCLCPP_INFO(node_->get_logger(), "error: %s", transform_tool_->error_message().c_str());
-        RCLCPP_INFO(node_->get_logger(), "[shoot] target_x: %f, target_y: %f, target_z: %f", position3d_shoot(0, 0), position3d_shoot(1, 0), position3d_shoot(2, 0));
-
-        RCLCPP_INFO(node_->get_logger(), "[world] target_x: %f, target_y: %f, target_z: %f", filter_position3d_world(0, 0), filter_position3d_world(1, 0), filter_position3d_world(2, 0));
-        RCLCPP_INFO(node_->get_logger(), "[camera] target_x: %f, target_y: %f, target_z: %f", pre_camera(0, 0), pre_camera(1, 0), pre_camera(2, 0));
-
-        RCLCPP_INFO(node_->get_logger(), "time: %f", time);
-        time_bet = (time_bet + time) / 2;
-        RCLCPP_INFO(node_->get_logger(), "平均时间间隔: %f ，fps: %f", time_bet, 1000.0 / time_bet);
-        RCLCPP_INFO(node_->get_logger(), "旋转周期：%f", auto_aim_time[0]);
-        RCLCPP_INFO(node_->get_logger(), "上一次装甲板面积最大时刻：%f", auto_aim_time[2]);
 #endif
         // 发布滤波后的目标点的位置信息
         geometry_msgs::msg::PointStamped cam_target_point;
@@ -483,10 +484,7 @@ namespace rm_infantry
             return false;
 
 #ifdef RM_DEBUG_MODE
-        if (1)
-        {
-            RCLCPP_INFO(node_->get_logger(), "distance_to_last_target: %f", distance);
-        }
+        RCLCPP_INFO(node_->get_logger(), "distance_to_last_target: %f", distance);
 #endif
     }
 }

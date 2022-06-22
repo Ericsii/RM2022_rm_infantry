@@ -178,11 +178,11 @@ namespace rm_infantry
         ret = armor_detector_->process(src);
         if (ret != 0)
         {
-            // #ifdef RM_DEBUG_MODE
+#ifdef RM_DEBUG_MODE
             cv::Mat debugImg = src;
             cv::imshow("target", debugImg);
             cv::waitKey(1);
-            // #endif
+#endif
             return 1; // 无目标
         }
         auto armor_descriptors = armor_detector_->getArmorVector();
@@ -484,10 +484,7 @@ namespace rm_infantry
             return false;
 
 #ifdef RM_DEBUG_MODE
-        if (1)
-        {
-            RCLCPP_INFO(node_->get_logger(), "distance_to_last_target: %f", distance);
-        }
+        RCLCPP_INFO(node_->get_logger(), "distance_to_last_target: %f", distance);
 #endif
     }
 }
